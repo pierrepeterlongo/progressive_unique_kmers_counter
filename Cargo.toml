@@ -12,3 +12,5 @@ warp = "0.3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 rustc-hash = "2.1.1"
 flate2 = "1.0"
+fxread = "0.2.14"
+needletail = "0.6.3"
