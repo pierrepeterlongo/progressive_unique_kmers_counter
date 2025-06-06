@@ -7,7 +7,7 @@ A Rust-based tool for visualizing the number of solid canonical kmers while stre
 ## Features
 
 - Supports **FASTA** and **FASTQ**
-- Supports **gzip-compressed** files (`.gz`)
+- Supports **gzip-compressed** files (`.gz`). **WARNING** In this case the extrapolation of number of reads and kmers is false. TODO: add an option to inform the number of reads. 
 - Real-time WebSocket output for monitoring
 - **Growth**: The number of new solid k-mers between read intervals.
 - **Acceleration**: The second derivative of k-mer discovery, indicating whether the rate of discovery is increasing, decreasing, or stabilizing
