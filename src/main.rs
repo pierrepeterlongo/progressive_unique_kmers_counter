@@ -31,6 +31,10 @@ struct Args {
     /// Give the number of reads
     #[arg(long, default_value_t = 0)]
     nb_reads: u64,
+
+    /// Plot the intermediate results in plot.html
+    #[arg(long, default_value_t = false)]
+    plot: bool,
 }
 
 
@@ -102,48 +106,6 @@ async fn handle_connection(ws: WebSocket, rx: Arc<Mutex<mpsc::Receiver<(u32, u32
         }
     }
 }
-//
-// fn open_reader(path: &PathBuf) -> Result<RecordReaderWrapper<Box<dyn ReadSeek>>, Box<dyn Error>> {
-//     let file = File::open(path)?;
-//     let reader: Box<dyn ReadSeek> = if path.extension().map(|e| e == "gz").unwrap_or(false) {
-//         Box::new(MultiGzDecoder::new(file))
-//     } else {
-//         Box::new(file)
-//     };
-//
-//     RecordReaderWrapper::new(reader)
-// }
-
-
-// fn open_reader(path: &PathBuf) -> Result<RecordReader<impl Read>, Box<dyn std::error::Error>> {
-//     let file = File::open(path)?;
-//     let reader: Box<dyn Read> = if path.extension().map(|e| e == "gz").unwrap_or(false) {
-//         Box::new(MultiGzDecoder::new(file))
-//     } else {
-//         Box::new(file)
-//     };
-
-//     let mut buffered = BufReader::new(reader);
-
-//     // Peek at the first byte
-//     let first_byte = {
-//         let buf = buffered.fill_buf()?;
-//         if buf.is_empty() {
-//             return Err("Input file is empty".into());
-//         }
-//         buf[0]
-//     };
-
-//     // Decide format by first byte
-//     if first_byte == b'>' {
-//         Ok(RecordReader::Fasta(fasta::Reader::new(buffered).records()))
-//     } else if first_byte == b'@' {
-//         Ok(RecordReader::Fastq(fastq::Reader::new(buffered).records()))
-//     } else {
-//         Err(format!("Unknown file format: expected '>' or '@', got '{}'", first_byte as char).into())
-//     }
-// }
-
 // function read_idx_records_and_get_position to read "idx" reads from a fastx file and return the position in the file
 
 fn read_idx_records_and_get_position(path: &PathBuf, idx: usize) -> Result<u64, Box<dyn Error>> {
@@ -280,9 +242,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 reads, kmers, avg_growth, avg_accel
             );
 
-            // WebSocket message can include acceleration too if desired
-            tx.send((reads, kmers)).await?;
-
+            
+            // WebSocket message 
+            if args.plot {
+               tx.send((reads, kmers)).await?;
+            }
             // Auto-stop condition
             if reads > 50000 && avg_accel.abs() < stop_acceleration {
                 println!(
@@ -323,6 +287,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // if the number of reads is given, we can estimate the total number of kmers
     if total_reads > 0 {
         println!("Total number of reads given: {}", total_reads);
+        if idx > total_reads as usize {
+            print!("Warning: idx ({}) is greater than total reads ({}). ", idx, total_reads);
+            println!("I use {} reads as total", total_reads);
+            idx = total_reads as usize;
+        }
+        // we can estimate the total number of kmers based on the number of reads and the reached position
     } else {
         total_reads = (file_size as f64 / reached_position as f64 * idx as f64) as u64;
         

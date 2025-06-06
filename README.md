@@ -43,6 +43,8 @@ Options:
       --nb-reads <NB_READS>
           Inform the number of reads
           [default: 0] (in this case the number of reads is estimated)
+      --plot
+          Plot the intermediate results in plot.html (may slowdown the process)
   -h, --help
           Print help
   -V, --version
@@ -56,5 +58,19 @@ unique_kmers_evolution --k 25 --input input.fq --stop-acceleration 20
 - In this case the solid 25-mers are counted as long as the acceleration over 50000 reads is higher than 20.
 - Then the number of kmers is extrapolated 
 
+## Full example.
+1/ Download the fasta.gz or fastq.gz entry from [SRR33792312](https://trace.ncbi.nlm.nih.gov/Traces/?view=run_browser&acc=SRR33792312&display=metadata). This file contains 2.2M reads (2113824 precisely).
+2/ Run :
+```bash
+unique_kmers_evolution --k 25 --input /tmp/SRR33792312.fasta.gz  --nb-reads 2113824
 
-**Visualize** the evolution of the results opening file `plot.html` in a browser (reload the page once the program runs)
+...
+
+Estimated total unique k-mers: 5642838
+```
+
+- Note1: this execution takes approximately 2s. 
+- Note2: the exact number of distinct solide 25-mers in this file is in fact 5239190.
+
+## Visualization
+- Using the `--plot` option **visualize** the evolution of the results opening file `plot.html` in a browser (reload the page once the program runs)
