@@ -24,7 +24,6 @@ A Rust-based tool for visualizing the number of solid canonical kmers while stre
 
 git clone https://github.com/yourusername/unique_kmers_evolution.git
 cd unique_kmers_evolution
-cargo build --release
 cargo install --path .  
 ```
 
