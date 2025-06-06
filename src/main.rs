@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use warp::ws::{Message, WebSocket};
 use warp::Filter;
-use fxread;
+use needletail::{parse_fastx_file, Sequence};
 use std::error::Error;
 
 
@@ -27,30 +27,14 @@ struct Args {
     /// Stop if acceleration is below this threshold
     #[arg(long, default_value_t = 10.0)]
     stop_acceleration: f32,
+
+    /// Give the number of reads
+    #[arg(long, default_value_t = 0)]
+    nb_reads: u64,
 }
 
 
-// enum RecordReader<R: Read> {
-//     Fasta(fasta::Records<BufReader<R>>),
-//     Fastq(fastq::Records<BufReader<R>>),
-// }
-
-// impl<R: Read> RecordReader<R> {
-//     fn next_record(&mut self) -> Option<Result<Vec<u8>, Box<dyn std::error::Error>>> {
-//         match self {
-//             RecordReader::Fasta(reader) => reader.next().map(|r| {
-//                 r.map(|rec| rec.seq().to_vec())
-//                     .map_err(|e| e.into())
-//             }),
-//             RecordReader::Fastq(reader) => reader.next().map(|r| {
-//                 r.map(|rec| rec.seq().to_vec())
-//                     .map_err(|e| e.into())
-//             }),
-//         }
-//     }
-// }
-
-fn encode_kmer_u64(kmer: &[u8]) -> Option<u64> {
+fn _encode_kmer_u64(kmer: &[u8]) -> Option<u64> {
     if kmer.len() > 32 {
         return None;
     }
@@ -68,7 +52,7 @@ fn encode_kmer_u64(kmer: &[u8]) -> Option<u64> {
     Some(value)
 }
 
-fn reverse_complement_u64(kmer: u64, k: usize) -> u64 {
+fn _reverse_complement_u64(kmer: u64, k: usize) -> u64 {
     let mut rc = 0u64;
     for i in 0..k {
         let base = (kmer >> (2 * i)) & 0b11;
@@ -78,8 +62,8 @@ fn reverse_complement_u64(kmer: u64, k: usize) -> u64 {
     rc
 }
 
-fn canonical_kmer_u64(kmer: u64, k: usize) -> u64 {
-    let rc = reverse_complement_u64(kmer, k);
+fn _canonical_kmer_u64(kmer: u64, k: usize) -> u64 {
+    let rc = _reverse_complement_u64(kmer, k);
     std::cmp::min(kmer, rc)
 }
 
@@ -161,26 +145,35 @@ async fn handle_connection(ws: WebSocket, rx: Arc<Mutex<mpsc::Receiver<(u32, u32
 // }
 
 // function read_idx_records_and_get_position to read "idx" reads from a fastx file and return the position in the file
-use fxread::initialize_reader;
+
 fn read_idx_records_and_get_position(path: &PathBuf, idx: usize) -> Result<u64, Box<dyn Error>> {
-    let mut reader = initialize_reader(path).unwrap();
+    let mut reader = parse_fastx_file(&path).expect("valid path/file");
+
+    // let mut reader = initialize_reader(path).unwrap();
     let mut position = 0;
     let mut current_idx = 0;
-    
+    // Iterate through the records until we reach the idx-th record
+    // or until we reach the end of the file
+    // We assume that the file is not empty and has at least idx records
+    if idx == 0 {
+        return Ok(0);
+    }
     while let Some(record) = reader.next() {
-        // if fasta sum the id and seq lengths
-        // if fastq sum the id, seq, and quality lengths
         if current_idx >= idx {
             break;
         }
-        if record.is_fasta() {
-            position += record.id().len() + record.seq().len() + 2; // +2 for newline characters
-        } else if record.is_fastq() {
-            position += record.id().len() + record.seq().len() + record.qual().unwrap().len() + 4; // +4 for newline characters and '+' line
+        // get the sequence record
+        let seq_record = record.expect("valid record");
+        // Since needletail does not provide is_fasta/is_fastq, we can check for quality
+        if seq_record.qual().is_none() {
+            // FASTA: no quality
+            position += seq_record.id().len() + seq_record.seq().len() + 2; // +2 for newline characters
         } else {
-            return Err("Unknown file format".into());
+            // FASTQ: has quality
+            position += seq_record.id().len() + seq_record.seq().len() + seq_record.qual().unwrap().len() + 4; // +4 for newline characters and '+' line
         }
         current_idx += 1;
+        // reader.next(); // Move to the next record (already done by while let Some(record) = reader.next())
     }
 
     Ok(position as u64)
@@ -194,8 +187,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let k = args.k;
     let stop_acceleration = args.stop_acceleration;
 
-    // let mut unique_kmers: FxHashMap<Vec<u8>, bool> = FxHashMap::default();
-    let mut unique_kmers: FxHashMap<u64, bool> = FxHashMap::default();
+    let mut unique_kmers: FxHashMap<Vec<u8>, bool> = FxHashMap::default();
     let mut unique_solid_kmers = 0;
 
     let (tx, rx) = mpsc::channel(100);
@@ -214,8 +206,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .run(([127, 0, 0, 1], 3030))
             .await;
     });
-
-    let mut reader = fxread::initialize_reader(&args.input)?;
+    let mut reader = parse_fastx_file(&args.input).expect("valid path/file");
+    // let mut reader = fxread::initialize_reader(&args.input)?;
     let mut idx = 0;
 
     let mut prev_kmers = 0u32;
@@ -223,32 +215,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut growth_history: Vec<i32> = Vec::new();
     let mut accel_history: Vec<i32> = Vec::new();
 
-    while let Some(seq_result) = reader.next_record()? {
-        let sequence = seq_result.as_str();
-        // check the length of the sequence
-        if sequence.len() < k {
-            idx += 1;
-            continue;
-        }
+    while let Some(record) = reader.next() {
+        
+        idx += 1;
+        let seqrec = record.expect("invalid record");
+        let norm_seq = seqrec.normalize(false);
+        let rc = norm_seq.reverse_complement();
+        for (_, kmer, _) in norm_seq.canonical_kmers(k as u8, &rc) {
+            // for debug purpose, print the k-mer in ascii, transforming the &[u8] to a string
+            // println!("Processing k-mer: {:?}", String::from_utf8_lossy(kmer));
 
-        for i in 0..=(sequence.len() - k) {
-            let kmer = &sequence[i..i + k];
-            if let Some(encoded) = encode_kmer_u64(kmer.as_bytes()) {
-                    let canonical = canonical_kmer_u64(encoded, k);
-                    match unique_kmers.get_mut(&canonical) {
+                match unique_kmers.get_mut(kmer) {
                         Some(seen) => {
                             if !*seen {
                                 *seen = true;
                                 unique_solid_kmers += 1;
+                                // println!(
+                                //     "Found new unique k-mer: {} (total: {})",
+                                //     String::from_utf8_lossy(kmer),
+                                //     unique_solid_kmers
+                                // );
                             }
                         }
                         None => {
-                            unique_kmers.insert(canonical, false);
+                            unique_kmers.insert(kmer.to_vec(), false);
+                            // println!(
+                            //     "Inserted new k-mer: {}",
+                            //     String::from_utf8_lossy(kmer)
+                            // );
                         }
                     }
-            }
-        }
-
+                }
         if idx % 10000 == 0 {
 
             let reads = idx as u32;
@@ -298,7 +295,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             prev_kmers = kmers;
         }
 
-        idx += 1;
     }
     println!(
         "Final unique k-mers: {}, after processing {} reads.",
@@ -306,31 +302,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
 
+    // special case for gzipped files
+    if args.input.extension().map(|e| e == "gz").unwrap_or(false) && args.nb_reads == 0 {
+        println!("Input file is gzipped, cannot estimated total number of kmers.");
+        return Ok(());
+    }
+
+
 	// get the reached position in the file
     let reached_position = read_idx_records_and_get_position(&args.input, idx)?;
     // get the file size
     let file_size = args.input.metadata()?.len();
-    // TODO: does not work for gzipped files
-    // special case for gzipped files
-    if args.input.extension().map(|e| e == "gz").unwrap_or(false) {
-        println!("Input file is gzipped, file size may not be accurate.");
-    }
+
     println!(
         "Reached position in file: {} (for {} reads), file size: {}",
         reached_position, idx, file_size
     );
-    // estimate the total number of reads in the file
-    let total_reads = (file_size as f64 / reached_position as f64 * idx as f64) as u64;
-    // remaining reads
-    let remaining_reads = total_reads - idx as u64;
-    println!(
-        "Estimated total reads: {}, remaining reads: {}",
-        total_reads, remaining_reads
-    );
+    let mut total_reads = args.nb_reads;
+
+    // if the number of reads is given, we can estimate the total number of kmers
+    if total_reads > 0 {
+        println!("Total number of reads given: {}", total_reads);
+    } else {
+        total_reads = (file_size as f64 / reached_position as f64 * idx as f64) as u64;
+        
+        println!(
+            "Estimated total reads: {}",
+            total_reads
+        );
+    }
 
     // we have the total number of remaining reads, given that we know the growth we can estimate the total number of remaining kmers
     // we use the last avg growth value to estimate the remaining kmers
     
+    // remaining reads
+    let remaining_reads = total_reads - idx as u64;
+    println!("Remaining reads: {}", remaining_reads);
+
     let estimated_remaining_kmers =  remaining_reads as f64 * avg_growth as f64 / 10000.0;
     println!(
         "Estimated remaining unique k-mers: {:.0} (based on last growth value of {:.1})",

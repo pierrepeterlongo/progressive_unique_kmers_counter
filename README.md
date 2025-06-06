@@ -40,6 +40,9 @@ Options:
           Input FASTA file
       --stop-acceleration <STOP_ACCELERATION>
           Stop if acceleration is below this threshold [default: 10]
+      --nb-reads <NB_READS>
+          Inform the number of reads
+          [default: 0] (in this case the number of reads is estimated)
   -h, --help
           Print help
   -V, --version
