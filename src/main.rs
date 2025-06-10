@@ -169,6 +169,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .run(([127, 0, 0, 1], 3030))
             .await;
     });
+
+    
     let mut reader = parse_fastx_file(&args.input).expect("valid path/file");
     // let mut reader = fxread::initialize_reader(&args.input)?;
     let mut idx = 0;
@@ -265,6 +267,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                     break;
                 }
+            }
             prev_kmers = kmers;
         }
 
