@@ -1,4 +1,4 @@
-# unique_kmers_evolution
+# Progressive Unique Kmer Counter (pukc)
 
 A Rust-based tool for visualizing the number of solid canonical kmers while streaming reads.
 
@@ -22,8 +22,8 @@ A Rust-based tool for visualizing the number of solid canonical kmers while stre
 
 ```bash
 
-git clone https://github.com/yourusername/unique_kmers_evolution.git
-cd unique_kmers_evolution
+git clone https://github.com/pierrepeterlongo/progressive_unique_kmers_counter.git
+cd progressive_unique_kmers_counter
 cargo install --path .  
 ```
 
@@ -31,7 +31,7 @@ cargo install --path .
 
 ```bash
 
-Usage: unique_kmers_evolution [OPTIONS] --k <K> --input <INPUT>
+Usage: pukc [OPTIONS] --k <K> --input <INPUT>
 
 Options:
   -k, --k <K>
@@ -53,7 +53,7 @@ Options:
 
 ## Example
 ```
-unique_kmers_evolution --k 25 --input input.fq --stop-acceleration 20
+pukc --k 25 --input input.fq --stop-acceleration 20
 ```
 - In this case the solid 25-mers are counted as long as the acceleration over 50000 reads is higher than 20.
 - Then the number of kmers is extrapolated 
@@ -62,7 +62,7 @@ unique_kmers_evolution --k 25 --input input.fq --stop-acceleration 20
 1/ Download the fasta.gz or fastq.gz entry from [SRR33792312](https://trace.ncbi.nlm.nih.gov/Traces/?view=run_browser&acc=SRR33792312&display=metadata). This file contains 2.2M reads (2113824 precisely).
 2/ Run :
 ```bash
-unique_kmers_evolution --k 25 --input /tmp/SRR33792312.fasta.gz  --nb-reads 2113824
+pukc --k 25 --input /tmp/SRR33792312.fasta.gz  --nb-reads 2113824
 
 ...
 
