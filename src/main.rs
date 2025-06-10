@@ -238,7 +238,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             println!(
-                "Processed {} reads, unique k-mers: {}, Δ_avg: {:.1}, Δ²_avg: {:.1}",
+                "Nb reads: {} Nb unique k-mers: {}, growth: {:.1}, acceleration: {:.1}",
                 reads, kmers, avg_growth, avg_accel
             );
 
