@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 bio = "2.3.0"
-plotters = "0.3"
 clap = { version = "4.0", features = ["derive"] }
 tokio = { version = "1.0", features = ["full"] }
 warp = "0.3"
