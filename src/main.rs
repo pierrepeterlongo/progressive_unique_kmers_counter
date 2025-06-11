@@ -213,7 +213,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-        if idx % 10000 == 0 {
+        if idx % 500 == 0 {
 
             let reads = idx as u32;
             let kmers = unique_solid_kmers;
@@ -321,7 +321,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let remaining_reads = total_reads - idx as u64;
     println!("Remaining reads: {}", remaining_reads);
 
-    let estimated_remaining_kmers =  remaining_reads as f64 * avg_growth as f64 / 10000.0;
+    let estimated_remaining_kmers =  remaining_reads as f64 * avg_growth as f64 / 500.0;
     println!(
         "Estimated remaining unique k-mers: {:.0} (based on last growth value of {:.1})",
         estimated_remaining_kmers, avg_growth
