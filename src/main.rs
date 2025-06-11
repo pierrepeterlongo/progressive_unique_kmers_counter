@@ -1,6 +1,5 @@
 use clap::Parser; 
 use futures::{SinkExt, StreamExt};
-use core::num;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
@@ -25,7 +24,7 @@ struct Args {
     #[arg(short, long)]
     input: PathBuf,
 
-    /// Stop if acceleration is below this threshold
+    /// Stop if acceleration is below or equal to this threshold
     #[arg(long, default_value_t = 10.0)]
     stop_acceleration: f32,
 
@@ -183,7 +182,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut avg_growth = 0.0;
     let mut growth_history: Vec<i32> = Vec::new();
     let mut accel_history: Vec<i32> = Vec::new();
-    let min_number_low_acceleration = 3; // Minimum number of low acceleration values to consider stopping
     // Initialize the growth history with a single value of 0
     let mut number_low_acceleration = 0;
     while let Some(record) = reader.next() {
@@ -257,12 +255,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                tx.send((reads, kmers)).await?;
             }
             // Auto-stop condition
-            if reads > 50000 && avg_accel.abs() < stop_acceleration {
+            if reads > 50000 && avg_accel.abs() <= stop_acceleration {
                 number_low_acceleration += 1;
 
                 println!(
                     "Low acceleration average {:.1}  number {}/{}.",
-                    avg_accel, number_low_acceleration, min_number_low_acceleration
+                    avg_accel, number_low_acceleration, args.min_number_low_acceleration
                 );
                 if number_low_acceleration >= args.min_number_low_acceleration {
                     println!(
