@@ -36,6 +36,10 @@ struct Args {
     /// Plot the intermediate results in plot.html
     #[arg(long, default_value_t = false)]
     plot: bool,
+
+    /// Stop the evaluation when the number of low acceleration values is reached
+    #[arg(long, default_value_t = 3)]
+    min_number_low_acceleration: usize,
 }
 
 
@@ -260,7 +264,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "Low acceleration average {:.1}  number {}/{}.",
                     avg_accel, number_low_acceleration, min_number_low_acceleration
                 );
-                if number_low_acceleration >= min_number_low_acceleration {
+                if number_low_acceleration >= args.min_number_low_acceleration {
                     println!(
                         "Stopping early: acceleration average {:.1} < {} after {} reads.",
                         avg_accel, stop_acceleration, reads
