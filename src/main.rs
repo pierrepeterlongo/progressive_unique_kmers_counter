@@ -214,8 +214,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             // );
                         }
                     }
-                }
-        if nb_kmers_seen % 5000 == 0 {
+                    if nb_kmers_seen % 5000 == 0 {
             let kmers = unique_solid_kmers;
             let growth = kmers as i32 - prev_kmers as i32;
 
@@ -253,7 +252,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                tx.send((nb_kmers_seen, kmers)).await?;
             }
             // Auto-stop condition
-            if nb_kmers_seen > 50000 && avg_accel.abs() <= stop_acceleration {
+            if nb_kmers_seen > 500000 && avg_accel.abs() <= stop_acceleration {
                 number_low_acceleration += 1;
 
                 println!(
@@ -270,6 +269,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             prev_kmers = kmers;
         }
+                }
+        
 
     }
     println!(
@@ -343,7 +344,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }; 
 
 
-    let estimated_remaining_solid_kmers =  estimated_kmers_remaining as f64 * avg_growth as f64 / 5000.0;
+    let estimated_remaining_solid_kmers =  estimated_kmers_remaining as f64 * avg_growth as f64 / 500000.0;
     println!(
         "Estimated remaining unique k-mers: {:.0} (based on last growth value of {:.1})",
         estimated_remaining_solid_kmers, avg_growth
