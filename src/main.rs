@@ -186,6 +186,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize the growth history with a single value of 0
     let mut number_low_acceleration = 0;
     let mut stop: bool = false;
+    let mut step = 5000; // step for printing the progress and computing acceleration
     while let Some(record) = reader.next() {
         if stop {
             break;
@@ -218,7 +219,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             // );
                         }
                     }
-                    if nb_kmers_seen % 5000 == 0 {
+                    if nb_kmers_seen % step == 0 {
             let kmers = unique_solid_kmers;
             let growth = kmers as i32 - prev_kmers as i32;
 
@@ -351,7 +352,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }; 
 
 
-    let estimated_remaining_solid_kmers =  estimated_kmers_remaining as f64 * avg_growth as f64 / 500000.0;
+    let estimated_remaining_solid_kmers =  estimated_kmers_remaining as f64 * avg_growth as f64 / step as f64;
     println!(
         "Estimated remaining unique k-mers: {:.0} (based on last growth value of {:.1})",
         estimated_remaining_solid_kmers, avg_growth
