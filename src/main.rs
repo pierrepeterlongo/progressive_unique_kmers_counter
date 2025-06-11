@@ -185,7 +185,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut accel_history: Vec<i32> = Vec::new();
     // Initialize the growth history with a single value of 0
     let mut number_low_acceleration = 0;
-    bool stop = false;
+    let mut stop: bool = false;
     while let Some(record) = reader.next() {
         if stop {
             break;
