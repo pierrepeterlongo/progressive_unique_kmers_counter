@@ -185,7 +185,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut accel_history: Vec<i32> = Vec::new();
     // Initialize the growth history with a single value of 0
     let mut number_low_acceleration = 0;
+    bool stop = false;
     while let Some(record) = reader.next() {
+        if stop {
+            break;
+        }
         nb_reads_seen += 1;
         let seqrec = record.expect("invalid record");
         let norm_seq = seqrec.normalize(false);
@@ -264,7 +268,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "Stopping early: acceleration average {:.1} < {} after {} kmers seen.",
                         avg_accel, stop_acceleration, nb_kmers_seen
                     );
-                    break;
+                    // stop the evaluation
+                    println!("Stopping evaluation due to low acceleration.");
+                    stop = true;
+                    break; 
                 }
             }
             prev_kmers = kmers;
@@ -354,3 +361,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+

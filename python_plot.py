@@ -4,7 +4,7 @@ import argparse
 
 def main(input_file_path):
     # Initialize an empty DataFrame
-    df = pd.DataFrame(columns=['Nb reads', 'Nb unique k-mers', 'growth', 'acceleration'])
+    df = pd.DataFrame(columns=['Nb kmers seen', 'Nb unique k-mers', 'growth', 'acceleration'])
 
     # Read the file and parse the lines
     # one line every 100 lines
@@ -12,22 +12,27 @@ def main(input_file_path):
     with open(input_file_path, 'r') as file:
         for line in file:
             nb_lines += 1
-            if line.startswith('Nb reads:') and nb_lines % 100 == 0:
+            if line.startswith('Nb kmers seen:') and nb_lines % 100 == 0:
                 parts = line.split()
-                nb_reads = int(parts[2])
-                nb_unique_kmers = int(parts[6].rstrip(','))
-                growth = float(parts[8].rstrip(','))
-                acceleration = float(parts[10])
-                df.loc[len(df)] = [nb_reads, nb_unique_kmers, growth, acceleration]
+                Nb_kmers_seen = int(parts[3])
+                nb_unique_kmers = int(parts[7].rstrip(','))
+                growth = float(parts[9].rstrip(','))
+                acceleration = float(parts[11])
+                df.loc[len(df)] = [Nb_kmers_seen, nb_unique_kmers, growth, acceleration]
 
-    # Plotting
+    # Get the file name without extension for the plot title
+    file_name = input_file_path.split('/')[-1].split('.')[0]
+    # Plotting to f'{file_name}_kmers_plot.png'
     plt.figure(figsize=(10, 6))
-    plt.plot(df['Nb reads'], df['Nb unique k-mers'], marker='o')
-    plt.title('Number of Unique k-mers vs Number of Reads')
-    plt.xlabel('Number of Reads')
-    plt.ylabel('Number of Unique k-mers')
+    plt.plot(df['Nb kmers seen'], df['Nb unique k-mers'], marker='o')
+    plt.title(f'{file_name} Nb distinct solid canonical k-mers vs Nb total of kmer')
+    plt.xlabel('Number of kmers seen')
+    plt.ylabel('Number of distinct solid canonical k-mers')
     plt.grid(True)
-    plt.show()
+    plt.savefig(f'{file_name}_kmers_plot.png')
+    print(f"Plot saved as {file_name}_kmers_plot.png")
+    
+    
 
 if __name__ == "__main__":
     # Set up command-line argument parsing
