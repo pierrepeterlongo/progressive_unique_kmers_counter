@@ -2,6 +2,7 @@ use clap::Parser;
 use futures::{SinkExt, StreamExt};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::usize;
 use tokio::sync::{mpsc, Mutex};
 use warp::ws::{Message, WebSocket};
 use warp::Filter;
@@ -40,7 +41,6 @@ struct Args {
     #[arg(long, default_value_t = 3)]
     min_number_low_acceleration: usize,
 }
-
 
 fn _encode_kmer_u64(kmer: &[u8]) -> Option<u64> {
     if kmer.len() > 32 {
@@ -176,7 +176,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let mut reader = parse_fastx_file(&args.input).expect("valid path/file");
     // let mut reader = fxread::initialize_reader(&args.input)?;
-    let mut idx = 0;
+    let mut nb_kmers_seen: u32 = 0;
+    let mut nb_reads_seen: usize = 0;
 
     let mut prev_kmers = 0u32;
     let mut avg_growth = 0.0;
@@ -185,15 +186,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize the growth history with a single value of 0
     let mut number_low_acceleration = 0;
     while let Some(record) = reader.next() {
-        
-        idx += 1;
+        nb_reads_seen += 1;
         let seqrec = record.expect("invalid record");
         let norm_seq = seqrec.normalize(false);
         let rc = norm_seq.reverse_complement();
         for (_, kmer, _) in norm_seq.canonical_kmers(k as u8, &rc) {
             // for debug purpose, print the k-mer in ascii, transforming the &[u8] to a string
             // println!("Processing k-mer: {:?}", String::from_utf8_lossy(kmer));
-
+                nb_kmers_seen += 1;
                 match unique_kmers.get_mut(kmer) {
                         Some(seen) => {
                             if !*seen {
@@ -215,9 +215,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-        if idx % 500 == 0 {
-
-            let reads = idx as u32;
+        if nb_kmers_seen % 5000 == 0 {
             let kmers = unique_solid_kmers;
             let growth = kmers as i32 - prev_kmers as i32;
 
@@ -245,17 +243,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             println!(
-                "Nb reads: {} Nb unique k-mers: {}, growth: {:.1}, acceleration: {:.1}",
-                reads, kmers, avg_growth, avg_accel
+                "Nb kmers seen: {} Nb unique k-mers: {}, growth: {:.1}, acceleration: {:.1}",
+                nb_kmers_seen, kmers, avg_growth, avg_accel
             );
 
             
             // WebSocket message 
             if args.plot {
-               tx.send((reads, kmers)).await?;
+               tx.send((nb_kmers_seen, kmers)).await?;
             }
             // Auto-stop condition
-            if reads > 50000 && avg_accel.abs() <= stop_acceleration {
+            if nb_kmers_seen > 50000 && avg_accel.abs() <= stop_acceleration {
                 number_low_acceleration += 1;
 
                 println!(
@@ -264,8 +262,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 if number_low_acceleration >= args.min_number_low_acceleration {
                     println!(
-                        "Stopping early: acceleration average {:.1} < {} after {} reads.",
-                        avg_accel, stop_acceleration, reads
+                        "Stopping early: acceleration average {:.1} < {} after {} kmers seen.",
+                        avg_accel, stop_acceleration, nb_kmers_seen
                     );
                     break;
                 }
@@ -275,8 +273,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     }
     println!(
-        "Final unique k-mers: {}, after processing {} reads.",
-        unique_solid_kmers, idx
+        "Final unique k-mers: {}, after processing {} kmers.",
+        unique_solid_kmers, nb_kmers_seen
     );
 
 
@@ -288,27 +286,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 
 	// get the reached position in the file
-    let reached_position = read_idx_records_and_get_position(&args.input, idx)?;
+    let reached_position = read_idx_records_and_get_position(&args.input, nb_reads_seen)?;
     // get the file size
     let file_size = args.input.metadata()?.len();
 
     println!(
-        "Reached position in file: {} (for {} reads), file size: {}",
-        reached_position, idx, file_size
+        "Reached position in file: {} (for {} reads, {} kmers seen), file size: {}",
+        reached_position, nb_reads_seen, nb_kmers_seen, file_size
     );
     let mut total_reads = args.nb_reads;
 
-    // if the number of reads is given, we can estimate the total number of kmers
+    // if the number of reads is given, we can estimate the total number of distinct canonical kmers
     if total_reads > 0 {
         println!("Total number of reads given: {}", total_reads);
-        if idx > total_reads as usize {
-            print!("Warning: idx ({}) is greater than total reads ({}). ", idx, total_reads);
+        if nb_reads_seen > total_reads as usize {
+            print!("Warning: idx ({}) is greater than total reads ({}). ", nb_reads_seen, total_reads);
             println!("I use {} reads as total", total_reads);
-            idx = total_reads as usize;
+            nb_reads_seen = total_reads as usize;
         }
         // we can estimate the total number of kmers based on the number of reads and the reached position
     } else {
-        total_reads = (file_size as f64 / reached_position as f64 * idx as f64) as u64;
+        total_reads = (file_size as f64 / reached_position as f64 * nb_reads_seen as f64) as u64;
         
         println!(
             "Estimated total reads: {}",
@@ -320,15 +318,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // we use the last avg growth value to estimate the remaining kmers
     
     // remaining reads
-    let remaining_reads = total_reads - idx as u64;
+    let remaining_reads = total_reads - nb_reads_seen as u64;
     println!("Remaining reads: {}", remaining_reads);
 
-    let estimated_remaining_kmers =  remaining_reads as f64 * avg_growth as f64 / 500.0;
+    // As we read nb_kmers_seen kmers, for nb_reads_seen reads, we can estimate how many kmers we would have seen for the remaining reads
+    let avg_kmers_seen_per_read = nb_kmers_seen as f64 / nb_reads_seen as f64;
+    println!(
+        "Average kmers seen per read: {:.2}",
+        avg_kmers_seen_per_read
+    );
+    // Estimate the number of kmers we would have seen for the remaining reads
+    let estimated_kmers_remaining = (remaining_reads as f64 * avg_kmers_seen_per_read) as u32;
+    println!(
+        "Estimated kmers remaining: {} (based on average kmers seen per read)",
+        estimated_kmers_remaining
+    );
+
+    // As we know estimated_kmers_remaining, and we know the growth per 5000 kmers, we can estimate the remaining unique kmers
+    // We assume that the growth is linear, so we can use the last avg_growth value to estimate the remaining unique kmers
+    avg_growth = if avg_growth < 0.0 {
+        0.0 
+    } else {
+        avg_growth
+    }; 
+
+
+    let estimated_remaining_solid_kmers =  estimated_kmers_remaining as f64 * avg_growth as f64 / 5000.0;
     println!(
         "Estimated remaining unique k-mers: {:.0} (based on last growth value of {:.1})",
-        estimated_remaining_kmers, avg_growth
+        estimated_remaining_solid_kmers, avg_growth
     );
-    println!("Estimated total unique k-mers: {:.0}", unique_solid_kmers as f64 + estimated_remaining_kmers);
+    println!("Estimated total unique k-mers: {:.0}", unique_solid_kmers as f64 + estimated_remaining_solid_kmers);
 
 
     Ok(())
