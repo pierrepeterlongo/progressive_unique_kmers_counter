@@ -1,13 +1,15 @@
 use clap::Parser; 
-use futures::{SinkExt, StreamExt};
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::usize;
-use tokio::sync::{mpsc, Mutex};
-use warp::ws::{Message, WebSocket};
-use warp::Filter;
 use needletail::{parse_fastx_file, Sequence};
 use std::error::Error;
+use std::usize;
+
+// UNCOMMENT THIS IF YOU WANT TO USE WEBSOCKET
+// use tokio::sync::{mpsc, Mutex};
+// use std::sync::Arc;
+// use warp::ws::{Message, WebSocket};
+// use warp::Filter;
+// use futures::{SinkExt, StreamExt};
 
 
 /// Fast hash map
@@ -33,9 +35,10 @@ struct Args {
     #[arg(long, default_value_t = 0)]
     nb_reads: u64,
 
-    /// Plot the intermediate results in plot.html
-    #[arg(long, default_value_t = false)]
-    plot: bool,
+    // // UNCOMMENT THIS IF YOU WANT TO USE WEBSOCKET
+    // /// Plot the intermediate results in plot.html
+    // #[arg(long, default_value_t = false)]
+    // plot: bool,
 
     /// Stop the evaluation when the number of low acceleration values is reached
     #[arg(long, default_value_t = 3)]
@@ -99,19 +102,20 @@ fn _canonical_kmer(kmer: &[u8]) -> Vec<u8> {
     }
 }
 
-/// WebSocket handling
-async fn handle_connection(ws: WebSocket, rx: Arc<Mutex<mpsc::Receiver<(u32, u32)>>>) {
-    let (mut ws_tx, _) = ws.split();
-    let mut rx = rx.lock().await;
-    while let Some((reads, kmers)) = rx.recv().await {
-        let message = format!("{} {}", reads, kmers);
-        if ws_tx.send(Message::text(message)).await.is_err() {
-            break;
-        }
-    }
-}
-// function read_idx_records_and_get_position to read "idx" reads from a fastx file and return the position in the file
+    // UNCOMMENT THIS IF YOU WANT TO USE WEBSOCKET
+// /// WebSocket handling
+// async fn handle_connection(ws: WebSocket, rx: Arc<Mutex<mpsc::Receiver<(u32, u32)>>>) {
+//     let (mut ws_tx, _) = ws.split();
+//     let mut rx = rx.lock().await;
+//     while let Some((reads, kmers)) = rx.recv().await {
+//         let message = format!("{} {}", reads, kmers);
+//         if ws_tx.send(Message::text(message)).await.is_err() {
+//             break;
+//         }
+//     }
+// }
 
+// function read_idx_records_and_get_position to read "idx" reads from a fastx file and return the position in the file
 fn read_idx_records_and_get_position(path: &PathBuf, idx: usize) -> Result<u64, Box<dyn Error>> {
     let mut reader = parse_fastx_file(&path).expect("valid path/file");
 
@@ -156,22 +160,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut unique_kmers: FxHashMap<Vec<u8>, bool> = FxHashMap::default();
     let mut unique_solid_kmers = 0;
 
-    let (tx, rx) = mpsc::channel(100);
-    let rx = Arc::new(Mutex::new(rx));
+    // UNCOMMENT THIS IF YOU WANT TO USE WEBSOCKET
+    // let (tx, rx) = mpsc::channel(100);
+    // let rx = Arc::new(Mutex::new(rx));
 
-    // WebSocket route
-    let ws_route = warp::path("ws")
-        .and(warp::ws())
-        .map(move |ws: warp::ws::Ws| {
-            let rx = rx.clone();
-            ws.on_upgrade(move |socket| handle_connection(socket, rx))
-        });
+    // // WebSocket route
+    // let ws_route = warp::path("ws")
+    //     .and(warp::ws())
+    //     .map(move |ws: warp::ws::Ws| {
+    //         let rx = rx.clone();
+    //         ws.on_upgrade(move |socket| handle_connection(socket, rx))
+    //     });
 
-    tokio::spawn(async move {
-        warp::serve(ws_route)
-            .run(([127, 0, 0, 1], 3030))
-            .await;
-    });
+    // tokio::spawn(async move {
+    //     warp::serve(ws_route)
+    //         .run(([127, 0, 0, 1], 3030))
+    //         .await;
+    // });
 
     
     let mut reader = parse_fastx_file(&args.input).expect("valid path/file");
@@ -186,7 +191,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize the growth history with a single value of 0
     let mut number_low_acceleration = 0;
     let mut stop: bool = false;
-    let mut step = 5000; // step for printing the progress and computing acceleration
+    let step = 500000; // step for printing the progress and computing acceleration
     while let Some(record) = reader.next() {
         if stop {
             break;
@@ -247,15 +252,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             println!(
-                "Nb kmers seen: {} Nb unique k-mers: {}, growth: {:.1}, acceleration: {:.1}",
+                "Nb kmers seen: {} Nb unique k-mers: {}, growth: {:.4}, acceleration: {:.4}",
                 nb_kmers_seen, kmers, avg_growth, avg_accel
             );
 
             
-            // WebSocket message 
-            if args.plot {
-               tx.send((nb_kmers_seen, kmers)).await?;
-            }
+            // UNCOMMENT THIS IF YOU WANT TO USE WEBSOCKET
+            // // WebSocket message 
+            // if args.plot {
+            //    tx.send((nb_kmers_seen, kmers)).await?;
+            // }
             // Auto-stop condition
             if nb_kmers_seen > 500000 && avg_accel.abs() <= stop_acceleration {
                 number_low_acceleration += 1;
@@ -266,8 +272,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 if number_low_acceleration >= args.min_number_low_acceleration {
                     println!(
-                        "Stopping early: acceleration average {:.1} < {} after {} kmers seen.",
-                        avg_accel, stop_acceleration, nb_kmers_seen
+                        "Stopping early: acceleration average {:.3} < {} after {} kmers seen ({} reads).",
+                        avg_accel, stop_acceleration, nb_kmers_seen, nb_reads_seen
                     );
                     // stop the evaluation
                     println!("Stopping evaluation due to low acceleration.");
@@ -287,9 +293,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
 
+    println!(
+        "Average distinct canonical kmers seen per kmer read: {:.2}",
+        unique_solid_kmers as f64 / nb_kmers_seen as f64
+    );
+
     // special case for gzipped files
     if args.input.extension().map(|e| e == "gz").unwrap_or(false) && args.nb_reads == 0 {
-        println!("Input file is gzipped, cannot estimated total number of kmers.");
+        println!("\x1b[93mInput file is gzipped, cannot estimated total number of kmers.\x1b[0m");
         return Ok(());
     }
 
@@ -299,22 +310,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // get the file size
     let file_size = args.input.metadata()?.len();
 
-    println!(
-        "Reached position in file: {} (for {} reads, {} kmers seen), file size: {}",
-        reached_position, nb_reads_seen, nb_kmers_seen, file_size
-    );
+    
     let mut total_reads = args.nb_reads;
 
     // if the number of reads is given, we can estimate the total number of distinct canonical kmers
     if total_reads > 0 {
         println!("Total number of reads given: {}", total_reads);
         if nb_reads_seen > total_reads as usize {
-            print!("Warning: idx ({}) is greater than total reads ({}). ", nb_reads_seen, total_reads);
-            println!("I use {} reads as total", total_reads);
-            nb_reads_seen = total_reads as usize;
+            print!("\x1b[93mWarning: idx ({}) is greater than total reads ({}). \x1b[0m", nb_reads_seen, total_reads);
+            println!("\x1b[93mI use {} reads as total\x1b[0m", nb_reads_seen);
+            nb_reads_seen = nb_reads_seen as usize;
         }
         // we can estimate the total number of kmers based on the number of reads and the reached position
     } else {
+        println!(
+        "Reached position in file: {} (for {} reads, {} kmers seen), file size: {}",
+        reached_position, nb_reads_seen, nb_kmers_seen, file_size
+        );
         total_reads = (file_size as f64 / reached_position as f64 * nb_reads_seen as f64) as u64;
         
         println!(
@@ -333,13 +345,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // As we read nb_kmers_seen kmers, for nb_reads_seen reads, we can estimate how many kmers we would have seen for the remaining reads
     let avg_kmers_seen_per_read = nb_kmers_seen as f64 / nb_reads_seen as f64;
     println!(
-        "Average kmers seen per read: {:.2}",
+        "Average total kmers seen per read: {:.2}",
         avg_kmers_seen_per_read
     );
     // Estimate the number of kmers we would have seen for the remaining reads
     let estimated_kmers_remaining = (remaining_reads as f64 * avg_kmers_seen_per_read) as u32;
     println!(
-        "Estimated kmers remaining: {} (based on average kmers seen per read)",
+        "Estimated total kmers remaining: {} (based on average total kmers seen per read)",
         estimated_kmers_remaining
     );
 
@@ -354,11 +366,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let estimated_remaining_solid_kmers =  estimated_kmers_remaining as f64 * avg_growth as f64 / step as f64;
     println!(
-        "Estimated remaining unique k-mers: {:.0} (based on last growth value of {:.1})",
-        estimated_remaining_solid_kmers, avg_growth
+        "Estimated remaining unique k-mers: {:.0} (based on last growth value of {:.1} each {} reads)",
+        estimated_remaining_solid_kmers, avg_growth, step
     );
-    println!("Estimated total unique k-mers: {:.0}", unique_solid_kmers as f64 + estimated_remaining_solid_kmers);
+    let estimated_total_distinct_canonical_kmers = unique_solid_kmers as f64 + estimated_remaining_solid_kmers;
+    println!("Estimated total distinct canonical k-mers: {:.0}", estimated_total_distinct_canonical_kmers);
 
+
+    // show the span (|log2(unique_solid_kmers)|)
+    println!(
+        "Span of distinct canonical k-mers: {:.0}",
+        estimated_total_distinct_canonical_kmers.log2()
+    );
 
     Ok(())
 }
