@@ -29,7 +29,7 @@ struct Args {
 
     /// Stop if acceleration is below or equal to this threshold
     #[arg(long, default_value_t = 10.0)]
-    stop_acceleration: f32,
+    stop_acceleration: f64,
 
     /// Give the number of reads
     #[arg(long, default_value_t = 0)]
@@ -115,6 +115,44 @@ fn _canonical_kmer(kmer: &[u8]) -> Vec<u8> {
 //     }
 // }
 
+
+// Given a set (f(x)=y) of (kmers seen, distinct solid kmers), fit a model f(x) = b*x + c*x^2 +d*x^3 of the last 50 values
+// using a cubic polynomial regression
+// and return the coefficients (b, c, d) as a tuple
+fn fit_model(nb_kmers: &[u64], nb_dskmers: &[u64]) -> (f64, f64, f64) {
+    let n = nb_kmers.len();
+    // if less than 50 reads, we cannot fit a cubic model, return (0.0, 0.0, 0.0)
+    if n < 50  {
+        return (0.0, 0.0, 0.0); // Not enough data or mismatched lengths
+    }
+
+    // Sum the last 50 values for necessary calculations
+    let nb_kmers = &nb_kmers[n - 50..];
+    let nb_dskmers = &nb_dskmers[n - 50..];
+    let n = nb_kmers.len() as f64;
+    let sum_x = nb_kmers.iter().sum::<u64>() as f64;
+    let sum_y = nb_dskmers.iter().sum::<u64>() as f64;
+    let sum_x2 = nb_kmers.iter().map(|&x| (x * x) as f64).sum::<f64>();
+    let sum_x3 = nb_kmers.iter().map(|&x| (x * x * x) as f64).sum::<f64>();
+    let sum_x4 = nb_kmers.iter().map(|&x| (x * x * x * x) as f64).sum::<f64>();
+    let sum_xy = nb_kmers.iter().zip(nb_dskmers).map(|(&x, &y)| (x * y) as f64).sum::<f64>();
+    let sum_x2y = nb_kmers.iter().zip(nb_dskmers).map(|(&x, &y)| (x * x * y) as f64).sum::<f64>();
+
+    // Solve the linear system using Cramer's rule or any other method
+    let denom = n as f64 * (sum_x2 * sum_x4 - sum_x3 * sum_x3)
+        - sum_x * (n as f64 * sum_x3 - sum_x2 * sum_x2);
+    
+    if denom == 0.0 {
+        return (0.0, 0.0, 0.0); // Degenerate case
+    }
+
+    let b = (n as f64 * sum_xy - sum_x * sum_y) / denom;
+    let c = (n as f64 * sum_x2y - sum_x2 * sum_y) / denom;
+    let d = (sum_xy - b * sum_x - c * sum_x2) / n as f64;
+
+    (b, c, d)
+}
+
 // function read_idx_records_and_get_position to read "idx" reads from a fastx file and return the position in the file
 fn read_idx_records_and_get_position(path: &PathBuf, idx: usize) -> Result<u64, Box<dyn Error>> {
     let mut reader = parse_fastx_file(&path).expect("valid path/file");
@@ -155,8 +193,7 @@ fn read_idx_records_and_get_position(path: &PathBuf, idx: usize) -> Result<u64, 
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let k = args.k;
-    let stop_acceleration = args.stop_acceleration;
-
+    
     let mut unique_kmers: FxHashMap<Vec<u8>, bool> = FxHashMap::default();
     let mut unique_solid_kmers = 0;
 
@@ -184,18 +221,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut nb_kmers_seen: u32 = 0;
     let mut nb_reads_seen: usize = 0;
 
-    let mut prev_kmers = 0u32;
-    let mut avg_growth = 0.0;
-    let mut growth_history: Vec<i32> = Vec::new();
-    let mut accel_history: Vec<i32> = Vec::new();
+
     // Initialize the growth history with a single value of 0
-    let mut number_low_acceleration = 0;
-    let mut stop: bool = false;
     let step = 500000; // step for printing the progress and computing acceleration
+
+    // vector of nb_reads_seen and nb_kmers_seen 
+    let mut nb_kmers_seen_history: Vec<u64> = Vec::new();
+    let mut nb_dskmers_seen_history: Vec<u64> = Vec::new();
+    // push 0 0 to these vectors
+    nb_kmers_seen_history.push(0);
+    nb_dskmers_seen_history.push(0);
+    let (mut b, mut c, mut d) = (0.0, 0.0, 0.0);
     while let Some(record) = reader.next() {
-        if stop {
-            break;
-        }
         nb_reads_seen += 1;
         let seqrec = record.expect("invalid record");
         let norm_seq = seqrec.normalize(false);
@@ -225,64 +262,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     if nb_kmers_seen % step == 0 {
-            let kmers = unique_solid_kmers;
-            let growth = kmers as i32 - prev_kmers as i32;
 
-            growth_history.push(growth);
-            if growth_history.len() > 10 {
-                growth_history.remove(0);
-            }
+                        // push the current values 
+                        nb_kmers_seen_history.push(nb_kmers_seen as u64);
+                        nb_dskmers_seen_history.push(unique_solid_kmers as u64);
+                        print!(
+                            "Processed {} reads, {} kmers seen, {} unique solid kmers. ",
+                            nb_reads_seen, nb_kmers_seen, unique_solid_kmers
+                        );
+                        // fit the model to the last 50 values
+                        (b, c, d) = fit_model(&nb_kmers_seen_history, &nb_dskmers_seen_history);
 
-            // Compute acceleration only if we have at least 2 growth values
-            if growth_history.len() >= 2 {
-                let acceleration = growth_history[growth_history.len() - 1]
-                    - growth_history[growth_history.len() - 2];
-                accel_history.push(acceleration);
-                if accel_history.len() > 10 {
-                    accel_history.remove(0);
-                }
-            }
-
-            // Compute averages
-            avg_growth = growth_history.iter().sum::<i32>() as f32 / growth_history.len() as f32;
-            let avg_accel = if !accel_history.is_empty() {
-                accel_history.iter().sum::<i32>() as f32 / accel_history.len() as f32
-            } else {
-                0.0
-            };
-
-            println!(
-                "Nb kmers seen: {} Nb unique k-mers: {}, growth: {:.4}, acceleration: {:.4}",
-                nb_kmers_seen, kmers, avg_growth, avg_accel
-            );
-
-            
-            // UNCOMMENT THIS IF YOU WANT TO USE WEBSOCKET
-            // // WebSocket message 
-            // if args.plot {
-            //    tx.send((nb_kmers_seen, kmers)).await?;
-            // }
-            // Auto-stop condition
-            if nb_kmers_seen > 500000 && avg_accel.abs() <= stop_acceleration {
-                number_low_acceleration += 1;
-
-                println!(
-                    "Low acceleration average {:.1}  number {}/{}.",
-                    avg_accel, number_low_acceleration, args.min_number_low_acceleration
-                );
-                if number_low_acceleration >= args.min_number_low_acceleration {
-                    println!(
-                        "Stopping early: acceleration average {:.3} < {} after {} kmers seen ({} reads).",
-                        avg_accel, stop_acceleration, nb_kmers_seen, nb_reads_seen
-                    );
-                    // stop the evaluation
-                    println!("Stopping evaluation due to low acceleration.");
-                    stop = true;
-                    break; 
-                }
-            }
-            prev_kmers = kmers;
-        }
+                        // if values are not (0, 0, 0)
+                        if b != 0.0 || c != 0.0 || d != 0.0 {
+                            println!(
+                                "Fitted model: f(x) = {:.3} * x + {:.3} * x^2 + {:.3} * x^3",
+                                b, c, d
+                            );
+                        } else {
+                            println!("Not enough data to fit a model.");
+                        }
+                        if d.abs() < args.stop_acceleration {
+                            println!("Stop the computation as acceleration is stable.");
+                            break;
+                        }
+                    }
                 }
         
 
@@ -296,6 +300,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "Average distinct canonical kmers seen per kmer read: {:.2}",
         unique_solid_kmers as f64 / nb_kmers_seen as f64
+    );
+    let avg_kmers_seen_per_read = nb_kmers_seen as f64 / nb_reads_seen as f64;
+    println!(
+        "Average total kmers seen per read: {:.2}",
+        avg_kmers_seen_per_read
     );
 
     // special case for gzipped files
@@ -342,12 +351,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let remaining_reads = total_reads - nb_reads_seen as u64;
     println!("Remaining reads: {}", remaining_reads);
 
-    // As we read nb_kmers_seen kmers, for nb_reads_seen reads, we can estimate how many kmers we would have seen for the remaining reads
-    let avg_kmers_seen_per_read = nb_kmers_seen as f64 / nb_reads_seen as f64;
-    println!(
-        "Average total kmers seen per read: {:.2}",
-        avg_kmers_seen_per_read
-    );
+    
     // Estimate the number of kmers we would have seen for the remaining reads
     let estimated_kmers_remaining = (remaining_reads as f64 * avg_kmers_seen_per_read) as u32;
     println!(
@@ -355,28 +359,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         estimated_kmers_remaining
     );
 
-    // As we know estimated_kmers_remaining, and we know the growth per 5000 kmers, we can estimate the remaining unique kmers
-    // We assume that the growth is linear, so we can use the last avg_growth value to estimate the remaining unique kmers
-    avg_growth = if avg_growth < 0.0 {
-        0.0 
-    } else {
-        avg_growth
-    }; 
+    // As we know estimated_kmers_remaining, and we know the growth per step kmers, we can estimate the remaining unique kmers
+    // We assume that the stable curve is in the form a +bx +cx^2
+    // We can consider only bx + cx^2 for computing the number of expected remaining distinct solid kmers
+    
+    // b and c cannot be negative, so we take the max of 0 and the values
+    b = b.max(0.0);
+    c = c.max(0.0);
+    // let estimated_remaining_solid_kmers =  estimated_kmers_remaining as f64 * avg_growth as f64 / step as f64;
 
+    let estimated_remaining_solid_kmers = (b * estimated_kmers_remaining as f64
+        + c * (estimated_kmers_remaining as f64).powi(2)) as u64;
 
-    let estimated_remaining_solid_kmers =  estimated_kmers_remaining as f64 * avg_growth as f64 / step as f64;
     println!(
-        "Estimated remaining unique k-mers: {:.0} (based on last growth value of {:.1} each {} reads)",
-        estimated_remaining_solid_kmers, avg_growth, step
+        "Estimated remaining unique k-mers: {:.0} (based on recent curve f(kmers) = {:.4}kmers + {:.4}kmers each kmer)",
+        estimated_remaining_solid_kmers, b, c
     );
-    let estimated_total_distinct_canonical_kmers = unique_solid_kmers as f64 + estimated_remaining_solid_kmers;
+    let estimated_total_distinct_canonical_kmers = unique_solid_kmers + estimated_remaining_solid_kmers;
     println!("Estimated total distinct canonical k-mers: {:.0}", estimated_total_distinct_canonical_kmers);
 
 
     // show the span (|log2(unique_solid_kmers)|)
     println!(
         "Span of distinct canonical k-mers: {:.0}",
-        estimated_total_distinct_canonical_kmers.log2()
+        estimated_total_distinct_canonical_kmers.ilog2()
     );
 
     Ok(())
