@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use needletail::{parse_fastx_file, Sequence};
 use std::error::Error;
 use std::usize;
+use polyfit_residuals::residuals_from_front;
+use ndarray::{arr1,Array2};
 
 // UNCOMMENT THIS IF YOU WANT TO USE WEBSOCKET
 // use tokio::sync::{mpsc, Mutex};
@@ -116,42 +118,44 @@ fn _canonical_kmer(kmer: &[u8]) -> Vec<u8> {
 // }
 
 
-// Given a set (f(x)=y) of (kmers seen, distinct solid kmers), fit a model f(x) = b*x + c*x^2 +d*x^3 of the last 50 values
-// using a cubic polynomial regression
-// and return the coefficients (b, c, d) as a tuple
-fn fit_model(nb_kmers: &[u64], nb_dskmers: &[u64]) -> (f64, f64, f64) {
-    let n = nb_kmers.len();
-    // if less than 50 reads, we cannot fit a cubic model, return (0.0, 0.0, 0.0)
-    if n < 50  {
-        return (0.0, 0.0, 0.0); // Not enough data or mismatched lengths
-    }
-
-    // Sum the last 50 values for necessary calculations
-    let nb_kmers = &nb_kmers[n - 50..];
-    let nb_dskmers = &nb_dskmers[n - 50..];
-    let n = nb_kmers.len() as f64;
-    let sum_x = nb_kmers.iter().sum::<u64>() as f64;
-    let sum_y = nb_dskmers.iter().sum::<u64>() as f64;
-    let sum_x2 = nb_kmers.iter().map(|&x| (x * x) as f64).sum::<f64>();
-    let sum_x3 = nb_kmers.iter().map(|&x| (x * x * x) as f64).sum::<f64>();
-    let sum_x4 = nb_kmers.iter().map(|&x| (x * x * x * x) as f64).sum::<f64>();
-    let sum_xy = nb_kmers.iter().zip(nb_dskmers).map(|(&x, &y)| (x * y) as f64).sum::<f64>();
-    let sum_x2y = nb_kmers.iter().zip(nb_dskmers).map(|(&x, &y)| (x * x * y) as f64).sum::<f64>();
-
-    // Solve the linear system using Cramer's rule or any other method
-    let denom = n as f64 * (sum_x2 * sum_x4 - sum_x3 * sum_x3)
-        - sum_x * (n as f64 * sum_x3 - sum_x2 * sum_x2);
+// // Given a set (f(x)=y) of (kmers seen, distinct solid kmers), fit a model f(x) = b*x + c*x^2 +d*x^3 of the last 50 values
+// // using a cubic polynomial regression
+// // and return the coefficients (b, c, d) as a tuple
+// fn fit_model(nb_kmers: &[u64], nb_dskmers: &[u64]) -> (f64, f64, f64) {
     
-    if denom == 0.0 {
-        return (0.0, 0.0, 0.0); // Degenerate case
-    }
+    
+//     let n = nb_kmers.len();
+//     // if less than 50 reads, we cannot fit a cubic model, return (0.0, 0.0, 0.0)
+//     if n < 50  {
+//         return (0.0, 0.0, 0.0); // Not enough data or mismatched lengths
+//     }
 
-    let b = (n as f64 * sum_xy - sum_x * sum_y) / denom;
-    let c = (n as f64 * sum_x2y - sum_x2 * sum_y) / denom;
-    let d = (sum_xy - b * sum_x - c * sum_x2) / n as f64;
+//     // Sum the last 50 values for necessary calculations
+//     let nb_kmers = &nb_kmers[n - 50..];
+//     let nb_dskmers = &nb_dskmers[n - 50..];
+//     let n = nb_kmers.len() as f64;
+//     let sum_x = nb_kmers.iter().sum::<u64>() as f64;
+//     let sum_y = nb_dskmers.iter().sum::<u64>() as f64;
+//     let sum_x2 = nb_kmers.iter().map(|&x| (x * x) as f64).sum::<f64>();
+//     let sum_x3 = nb_kmers.iter().map(|&x| (x * x * x) as f64).sum::<f64>();
+//     let sum_x4 = nb_kmers.iter().map(|&x| (x * x * x * x) as f64).sum::<f64>();
+//     let sum_xy = nb_kmers.iter().zip(nb_dskmers).map(|(&x, &y)| (x * y) as f64).sum::<f64>();
+//     let sum_x2y = nb_kmers.iter().zip(nb_dskmers).map(|(&x, &y)| (x * x * y) as f64).sum::<f64>();
 
-    (b, c, d)
-}
+//     // Solve the linear system using Cramer's rule or any other method
+//     let denom = n as f64 * (sum_x2 * sum_x4 - sum_x3 * sum_x3)
+//         - sum_x * (n as f64 * sum_x3 - sum_x2 * sum_x2);
+    
+//     if denom == 0.0 {
+//         return (0.0, 0.0, 0.0); // Degenerate case
+//     }
+
+//     let b = (n as f64 * sum_xy - sum_x * sum_y) / denom;
+//     let c = (n as f64 * sum_x2y - sum_x2 * sum_y) / denom;
+//     let d = (sum_xy - b * sum_x - c * sum_x2) / n as f64;
+
+//     (b, c, d)
+// }
 
 // function read_idx_records_and_get_position to read "idx" reads from a fastx file and return the position in the file
 fn read_idx_records_and_get_position(path: &PathBuf, idx: usize) -> Result<u64, Box<dyn Error>> {
@@ -188,9 +192,10 @@ fn read_idx_records_and_get_position(path: &PathBuf, idx: usize) -> Result<u64, 
 }
 
 
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+// UNCOMMENT THIS IF YOU WANT TO USE WEBSOCKET
+// #[tokio::main]
+// async 
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let k = args.k;
     
@@ -225,14 +230,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize the growth history with a single value of 0
     let step = 500000; // step for printing the progress and computing acceleration
 
-    // vector of nb_reads_seen and nb_kmers_seen 
-    let mut nb_kmers_seen_history: Vec<u64> = Vec::new();
-    let mut nb_dskmers_seen_history: Vec<u64> = Vec::new();
-    // push 0 0 to these vectors
-    nb_kmers_seen_history.push(0);
-    nb_dskmers_seen_history.push(0);
-    let (mut b, mut c, mut d) = (0.0, 0.0, 0.0);
+    // vector of nb_reads_seen and nb_kmers_seen as arr1
+    let mut nb_kmers_seen_history = vec![0];
+    let mut nb_dskmers_seen_history = vec![0];
+    // let mut nb_kmers_seen_history: Vec<u64> = Vec::new();
+    // let mut nb_dskmers_seen_history: Vec<u64> = Vec::new();
+    // // push 0 0 to these vectors
+    // nb_kmers_seen_history.push(0);
+    // nb_dskmers_seen_history.push(0);
+    let mut b: f64 = 0.0;
+    let mut c: f64 = 0.0;
+    let mut d: f64 = 0.0;
+    let mut stop = false;
     while let Some(record) = reader.next() {
+        if stop {
+            break;
+        }
         nb_reads_seen += 1;
         let seqrec = record.expect("invalid record");
         let norm_seq = seqrec.normalize(false);
@@ -264,26 +277,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if nb_kmers_seen % step == 0 {
 
                         // push the current values 
-                        nb_kmers_seen_history.push(nb_kmers_seen as u64);
-                        nb_dskmers_seen_history.push(unique_solid_kmers as u64);
+                        nb_kmers_seen_history.push(nb_kmers_seen);
+                        nb_dskmers_seen_history.push(unique_solid_kmers);
                         print!(
                             "Processed {} reads, {} kmers seen, {} unique solid kmers. ",
                             nb_reads_seen, nb_kmers_seen, unique_solid_kmers
                         );
-                        // fit the model to the last 50 values
-                        (b, c, d) = fit_model(&nb_kmers_seen_history, &nb_dskmers_seen_history);
+                        // Slice the vector to get the last 50 elements
 
-                        // if values are not (0, 0, 0)
-                        if b != 0.0 || c != 0.0 || d != 0.0 {
-                            println!(
-                                "Fitted model: f(x) = {:.3} * x + {:.3} * x^2 + {:.3} * x^3",
-                                b, c, d
-                            );
-                        } else {
-                            println!("Not enough data to fit a model.");
-                        }
+                        // Create a new vector `arr1_nb_kmers_seen_history` and extend it with the last 50 values
+                        let arr1_nb_kmers_seen_history = &nb_kmers_seen_history[nb_kmers_seen_history.len() - 50..];
+                        let arr1_nb_dskmers_seen_history = &nb_dskmers_seen_history[nb_dskmers_seen_history.len() - 50..];
+
+                        use ndarray::ArrayView1;
+                        // Convert u32 slices to Vec<f64>
+                        let arr1_nb_kmers_seen_history_f64: Vec<f64> = arr1_nb_kmers_seen_history.iter().map(|&x| x as f64).collect();
+                        let arr1_nb_dskmers_seen_history_f64: Vec<f64> = arr1_nb_dskmers_seen_history.iter().map(|&x| x as f64).collect();
+
+                        let arr1_nb_kmers_seen_history = ArrayView1::from(&arr1_nb_kmers_seen_history_f64[..]);
+                        let arr1_nb_dskmers_seen_history = ArrayView1::from(&arr1_nb_dskmers_seen_history_f64[..]);
+
+                        let residuals: Array2<f64> = residuals_from_front(arr1_nb_kmers_seen_history, arr1_nb_dskmers_seen_history, 3).unwrap();
+                        // print polynomial coefficients
+                        println!("y = {} + {}x + {}x^2 + {}x^3", residuals[[0, 0]], residuals[[1, 0]], residuals[[2, 0]], residuals[[3, 0]]);
+
+                        // // fit the model to the last 50 values
+                        // (b, c, d) = fit_model(&nb_kmers_seen_history, &nb_dskmers_seen_history);
+                        // TODO : get the coefficients of the polynomial
+                        b = residuals[[1, 0]];
+                        c = residuals[[2, 0]];
+                        d = residuals[[3, 0]];
+
+                        
+
                         if d.abs() < args.stop_acceleration {
                             println!("Stop the computation as acceleration is stable.");
+                            stop = true;
                             break;
                         }
                     }
@@ -368,7 +397,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     c = c.max(0.0);
     // let estimated_remaining_solid_kmers =  estimated_kmers_remaining as f64 * avg_growth as f64 / step as f64;
 
-    let estimated_remaining_solid_kmers = (b * estimated_kmers_remaining as f64
+    let estimated_remaining_solid_kmers = (b * (estimated_kmers_remaining as f64)
         + c * (estimated_kmers_remaining as f64).powi(2)) as u64;
 
     println!(
