@@ -5,6 +5,8 @@ use std::error::Error;
 use std::usize;
 use polyfit_residuals::residuals_from_front;
 use ndarray::{arr1,Array2};
+use std::io::Write; // debug purpose, to print the progress
+
 
 // UNCOMMENT THIS IF YOU WANT TO USE WEBSOCKET
 // use tokio::sync::{mpsc, Mutex};
@@ -196,6 +198,17 @@ fn read_idx_records_and_get_position(path: &PathBuf, idx: usize) -> Result<u64, 
 // #[tokio::main]
 // async 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+    use polyfit_residuals::try_fit_poly;
+use ndarray::arr1;
+
+let xs = arr1(&[1., 2., 3., 4.]);
+let ys = arr1(&[3., 7., 13., 21.]);
+let poly =
+    try_fit_poly(xs.view(), ys.view(), 2).expect("Failed to fit linear polynomial to data");
+
+    panic!("Polyfit result: {:?}", poly);
+
     let args = Args::parse();
     let k = args.k;
     
@@ -228,7 +241,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 
     // Initialize the growth history with a single value of 0
-    let step = 500000; // step for printing the progress and computing acceleration
+    let step = 5000; // step for printing the progress and computing acceleration
 
     // vector of nb_reads_seen and nb_kmers_seen as arr1
     let mut nb_kmers_seen_history = vec![0];
@@ -243,6 +256,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut d: f64 = 0.0;
     let mut stop = false;
     while let Some(record) = reader.next() {
+        // println!(
+        //                     "Processed {} reads, {} kmers seen, {} unique solid kmers. ",
+        //                     nb_reads_seen, nb_kmers_seen, unique_solid_kmers
+        //                 );
         if stop {
             break;
         }
@@ -274,49 +291,61 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             // );
                         }
                     }
-                    if nb_kmers_seen % step == 0 {
-
-                        // push the current values 
-                        nb_kmers_seen_history.push(nb_kmers_seen);
-                        nb_dskmers_seen_history.push(unique_solid_kmers);
-                        print!(
-                            "Processed {} reads, {} kmers seen, {} unique solid kmers. ",
-                            nb_reads_seen, nb_kmers_seen, unique_solid_kmers
-                        );
-                        // Slice the vector to get the last 50 elements
-
-                        // Create a new vector `arr1_nb_kmers_seen_history` and extend it with the last 50 values
-                        let arr1_nb_kmers_seen_history = &nb_kmers_seen_history[nb_kmers_seen_history.len() - 50..];
-                        let arr1_nb_dskmers_seen_history = &nb_dskmers_seen_history[nb_dskmers_seen_history.len() - 50..];
-
-                        use ndarray::ArrayView1;
-                        // Convert u32 slices to Vec<f64>
-                        let arr1_nb_kmers_seen_history_f64: Vec<f64> = arr1_nb_kmers_seen_history.iter().map(|&x| x as f64).collect();
-                        let arr1_nb_dskmers_seen_history_f64: Vec<f64> = arr1_nb_dskmers_seen_history.iter().map(|&x| x as f64).collect();
-
-                        let arr1_nb_kmers_seen_history = ArrayView1::from(&arr1_nb_kmers_seen_history_f64[..]);
-                        let arr1_nb_dskmers_seen_history = ArrayView1::from(&arr1_nb_dskmers_seen_history_f64[..]);
-
-                        let residuals: Array2<f64> = residuals_from_front(arr1_nb_kmers_seen_history, arr1_nb_dskmers_seen_history, 3).unwrap();
-                        // print polynomial coefficients
-                        println!("y = {} + {}x + {}x^2 + {}x^3", residuals[[0, 0]], residuals[[1, 0]], residuals[[2, 0]], residuals[[3, 0]]);
-
-                        // // fit the model to the last 50 values
-                        // (b, c, d) = fit_model(&nb_kmers_seen_history, &nb_dskmers_seen_history);
-                        // TODO : get the coefficients of the polynomial
-                        b = residuals[[1, 0]];
-                        c = residuals[[2, 0]];
-                        d = residuals[[3, 0]];
-
-                        
-
-                        if d.abs() < args.stop_acceleration {
-                            println!("Stop the computation as acceleration is stable.");
-                            stop = true;
-                            break;
-                        }
-                    }
                 }
+
+            if nb_reads_seen % step == 0 {
+
+                // push the current values 
+                nb_kmers_seen_history.push(nb_kmers_seen);
+                nb_dskmers_seen_history.push(unique_solid_kmers);
+                
+                    println!(
+                    "Processed {} reads, {} kmers seen, {} unique solid kmers. ",
+                    nb_reads_seen, nb_kmers_seen, unique_solid_kmers
+                );
+                if nb_kmers_seen_history.len() < 50 {
+                    println!("Not enough data to compute acceleration, waiting for more reads...");
+                    continue; // Not enough data to compute acceleration
+                }
+                // Slice the vector to get the last 50 elements
+
+                // Create a new vector `arr1_nb_kmers_seen_history` and extend it with the last 50 values
+                let arr1_nb_kmers_seen_history = &nb_kmers_seen_history[nb_kmers_seen_history.len() - 50..];
+                let arr1_nb_dskmers_seen_history = &nb_dskmers_seen_history[nb_dskmers_seen_history.len() - 50..];
+
+                use ndarray::ArrayView1;
+                // Convert u32 slices to Vec<f64>
+                let arr1_nb_kmers_seen_history_f64: Vec<f64> = arr1_nb_kmers_seen_history.iter().map(|&x| x as f64).collect();
+                let arr1_nb_dskmers_seen_history_f64: Vec<f64> = arr1_nb_dskmers_seen_history.iter().map(|&x| x as f64).collect();
+
+                let arr1_nb_kmers_seen_history = ArrayView1::from(&arr1_nb_kmers_seen_history_f64[..]);
+                let arr1_nb_dskmers_seen_history = ArrayView1::from(&arr1_nb_dskmers_seen_history_f64[..]);
+
+                println!(
+                    "{} kmers seen, {} unique solid kmers.",
+                    arr1_nb_kmers_seen_history,
+                    arr1_nb_dskmers_seen_history
+                );
+
+                let residuals: Array2<f64> = residuals_from_front(arr1_nb_kmers_seen_history, arr1_nb_kmers_seen_history, 3).unwrap();
+                // print polynomial coefficients
+                println!("y = {} + {}x + {}x^2 + {}x^3", residuals[[0, 0]], residuals[[0, 1]], residuals[[0, 2]], residuals[[0, 3]]);
+                println!("Residuals: {:?}", residuals); 
+                // // fit the model to the last 50 values
+                // (b, c, d) = fit_model(&nb_kmers_seen_history, &nb_dskmers_seen_history);
+                // TODO : get the coefficients of the polynomial
+                b = residuals[[0, 1]];
+                c = residuals[[0, 2]];
+                d = residuals[[0, 3]];
+
+                
+
+                if d.abs() < args.stop_acceleration {
+                    println!("Stop the computation as acceleration is stable.");
+                    stop = true;
+                    break;
+                }
+            }
         
 
     }
