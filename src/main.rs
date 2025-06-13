@@ -346,7 +346,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 if coefs_cube[3] < args.stop_acceleration {
                     verbose!("Try to stop the computation as acceleration is stable.");
-                    let coefs_quad = fit_quadratic(&nb_kmers_seen_history, &nb_dskmers_seen_history);
+                    let coefs_quad = fit_quadratic(&nb_kmers_seen_history[nb_kmers_seen_history.len()-10..], &nb_dskmers_seen_history[nb_kmers_seen_history.len()-10..]);
                     assert!(coefs_quad.is_some(), "Failed to fit quadratic model");
                     let coefs_quad = coefs_quad.unwrap();
                     // b is the linear coefficient, c is the quadratic coefficient
