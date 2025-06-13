@@ -4,21 +4,22 @@ import argparse
 
 def main(input_file_path):
     # Initialize an empty DataFrame
-    df = pd.DataFrame(columns=['Nb kmers seen', 'Nb unique k-mers', 'growth', 'acceleration'])
-
+    df = pd.DataFrame(columns=['Nb kmers seen', 'Nb unique k-mers'])
+    # A  line is expected to be like:
+    # Processed 190000 reads, 13994639 kmers seen, 3008814 unique solid kmers.
     # Read the file and parse the lines
-    # one line every 100 lines
+    # one line every 10 lines
     nb_lines = 0
     with open(input_file_path, 'r') as file:
         for line in file:
             nb_lines += 1
-            if line.startswith('Nb kmers seen:') and nb_lines % 100 == 0:
-                parts = line.split()
-                Nb_kmers_seen = int(parts[3])
-                nb_unique_kmers = int(parts[7].rstrip(','))
-                growth = float(parts[9].rstrip(','))
-                acceleration = float(parts[11])
-                df.loc[len(df)] = [Nb_kmers_seen, nb_unique_kmers, growth, acceleration]
+            if line.startswith('Processed'):
+                nb_lines += 1
+                if nb_lines % 1 == 0:
+                    parts = line.split()
+                    Nb_kmers_seen = int(parts[3])
+                    nb_unique_kmers = int(parts[6].rstrip(','))
+                    df.loc[len(df)] = [Nb_kmers_seen, nb_unique_kmers]
 
     # Get the file name without extension for the plot title
     file_name = input_file_path.split('/')[-1].split('.')[0]

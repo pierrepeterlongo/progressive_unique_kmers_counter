@@ -3,9 +3,8 @@ use std::path::PathBuf;
 use needletail::{parse_fastx_file, Sequence};
 use std::error::Error;
 use std::usize;
-use polyfit_residuals::residuals_from_front;
-use ndarray::{arr1,Array2};
-use std::io::Write; // debug purpose, to print the progress
+use nalgebra::{DMatrix, DVector, SVD};
+use verbose_macros::{debug, verbose};
 
 
 // UNCOMMENT THIS IF YOU WANT TO USE WEBSOCKET
@@ -44,67 +43,16 @@ struct Args {
     // #[arg(long, default_value_t = false)]
     // plot: bool,
 
-    /// Stop the evaluation when the number of low acceleration values is reached
-    #[arg(long, default_value_t = 3)]
-    min_number_low_acceleration: usize,
+
+    /// Show progress and details
+    #[arg(short, long, default_value_t = false)]
+    verbose: bool,
+
+    /// Show debug information
+    #[arg(short, long, default_value_t = false)]
+    debug: bool,
 }
 
-fn _encode_kmer_u64(kmer: &[u8]) -> Option<u64> {
-    if kmer.len() > 32 {
-        return None;
-    }
-    let mut value: u64 = 0;
-    for &base in kmer {
-        value <<= 2;
-        match base {
-            b'A' | b'a' => value |= 0,
-            b'C' | b'c' => value |= 1,
-            b'G' | b'g' => value |= 2,
-            b'T' | b't' => value |= 3,
-            _ => return None, // non-ACGT
-        }
-    }
-    Some(value)
-}
-
-fn _reverse_complement_u64(kmer: u64, k: usize) -> u64 {
-    let mut rc = 0u64;
-    for i in 0..k {
-        let base = (kmer >> (2 * i)) & 0b11;
-        let comp = base ^ 0b11; // complement (A<->T, C<->G)
-        rc |= comp << (2 * (k - i - 1));
-    }
-    rc
-}
-
-fn _canonical_kmer_u64(kmer: u64, k: usize) -> u64 {
-    let rc = _reverse_complement_u64(kmer, k);
-    std::cmp::min(kmer, rc)
-}
-
-/// Fast reverse complement for &[u8]
-fn _reverse_complement(kmer: &[u8]) -> Vec<u8> {
-    kmer.iter()
-        .rev()
-        .map(|&c| match c {
-            b'A' => b'T',
-            b'T' => b'A',
-            b'C' => b'G',
-            b'G' => b'C',
-            _ => c,
-        })
-        .collect()
-}
-
-/// Return the canonical k-mer (lexicographically smallest between kmer and its reverse complement)
-fn _canonical_kmer(kmer: &[u8]) -> Vec<u8> {
-    let rc = _reverse_complement(kmer);
-    if kmer <= rc.as_slice() {
-        kmer.to_vec()
-    } else {
-        rc
-    }
-}
 
     // UNCOMMENT THIS IF YOU WANT TO USE WEBSOCKET
 // /// WebSocket handling
@@ -118,46 +66,42 @@ fn _canonical_kmer(kmer: &[u8]) -> Vec<u8> {
 //         }
 //     }
 // }
+use plotters::prelude::*;
+/// plot the accumulated results y in function of x as well as the fitted (y = bx + cx^2) curves in a plot.png file
+fn plot_curves(xs: &[f64], ys: &[f64], a: f64, b: f64, c: f64) -> Result<(), Box<dyn Error>> {
+    let root = BitMapBackend::new("plot.png", (800, 600)).into_drawing_area();
+    root.fill(&WHITE)?;
+
+    let mut chart = ChartBuilder::on(&root)
+        .caption("K-mer Growth Curve", ("sans-serif", 30))
+        .margin(5)
+        .x_label_area_size(30)
+        .y_label_area_size(30)
+        .build_cartesian_2d(0f64..*xs.last().unwrap(), 0f64..*ys.last().unwrap())?;
+
+    chart
+        .configure_mesh()
+        .x_desc("K-mers seen")
+        .y_desc("Distinct canonical k-mers")
+        .draw()?;
+
+    // Plot the data points
+    chart.draw_series(LineSeries::new(
+        xs.iter().zip(ys.iter()).map(|(&x, &y)| (x, y)),
+        &RED,
+    ))?;
+
+    // Plot the fitted curve
+    chart.draw_series(LineSeries::new(
+        xs.iter().map(|&x| (x, a + b * x + c * x.powi(2))),
+        &BLUE,
+    ))?;
+
+    root.present()?;
+    Ok(())
+}
 
 
-// // Given a set (f(x)=y) of (kmers seen, distinct solid kmers), fit a model f(x) = b*x + c*x^2 +d*x^3 of the last 50 values
-// // using a cubic polynomial regression
-// // and return the coefficients (b, c, d) as a tuple
-// fn fit_model(nb_kmers: &[u64], nb_dskmers: &[u64]) -> (f64, f64, f64) {
-    
-    
-//     let n = nb_kmers.len();
-//     // if less than 50 reads, we cannot fit a cubic model, return (0.0, 0.0, 0.0)
-//     if n < 50  {
-//         return (0.0, 0.0, 0.0); // Not enough data or mismatched lengths
-//     }
-
-//     // Sum the last 50 values for necessary calculations
-//     let nb_kmers = &nb_kmers[n - 50..];
-//     let nb_dskmers = &nb_dskmers[n - 50..];
-//     let n = nb_kmers.len() as f64;
-//     let sum_x = nb_kmers.iter().sum::<u64>() as f64;
-//     let sum_y = nb_dskmers.iter().sum::<u64>() as f64;
-//     let sum_x2 = nb_kmers.iter().map(|&x| (x * x) as f64).sum::<f64>();
-//     let sum_x3 = nb_kmers.iter().map(|&x| (x * x * x) as f64).sum::<f64>();
-//     let sum_x4 = nb_kmers.iter().map(|&x| (x * x * x * x) as f64).sum::<f64>();
-//     let sum_xy = nb_kmers.iter().zip(nb_dskmers).map(|(&x, &y)| (x * y) as f64).sum::<f64>();
-//     let sum_x2y = nb_kmers.iter().zip(nb_dskmers).map(|(&x, &y)| (x * x * y) as f64).sum::<f64>();
-
-//     // Solve the linear system using Cramer's rule or any other method
-//     let denom = n as f64 * (sum_x2 * sum_x4 - sum_x3 * sum_x3)
-//         - sum_x * (n as f64 * sum_x3 - sum_x2 * sum_x2);
-    
-//     if denom == 0.0 {
-//         return (0.0, 0.0, 0.0); // Degenerate case
-//     }
-
-//     let b = (n as f64 * sum_xy - sum_x * sum_y) / denom;
-//     let c = (n as f64 * sum_x2y - sum_x2 * sum_y) / denom;
-//     let d = (sum_xy - b * sum_x - c * sum_x2) / n as f64;
-
-//     (b, c, d)
-// }
 
 // function read_idx_records_and_get_position to read "idx" reads from a fastx file and return the position in the file
 fn read_idx_records_and_get_position(path: &PathBuf, idx: usize) -> Result<u64, Box<dyn Error>> {
@@ -193,27 +137,80 @@ fn read_idx_records_and_get_position(path: &PathBuf, idx: usize) -> Result<u64, 
     Ok(position as u64)
 }
 
+// Fit a quadratic a + bx + cx¨2 polynomial to the given x and y data points using least squares
+// Returns the coefficients [a, b, c] if successful, or None if the input is invalid
+fn fit_quadratic(xs: &[f64], ys: &[f64]) -> Option<Vec<f64>> {
+    let n = xs.len();
+    if n != ys.len() || n < 3 {
+        return None; // Not enough data points or mismatched lengths
+    }
+
+    // Create the design matrix A
+    let mut a = DMatrix::zeros(n, 3);
+    for (i, &x) in xs.iter().enumerate() {
+        a[(i, 0)] = x * x;
+        a[(i, 1)] = x;
+        a[(i, 2)] = 1.0;
+    }
+
+    // Create the observation vector y
+    let y = DVector::from_column_slice(ys);
+
+    // Solve the least squares problem using SVD
+    let svd = SVD::new(a, true, true);
+    let coefficients = svd.solve(&y, 1e-10).ok()?;
+
+    let mut coeffs = coefficients.as_slice().to_vec();
+    coeffs.reverse();
+    Some(coeffs)
+}
+
+
+fn fit_cubic(xs: &[f64], ys: &[f64]) -> Option<Vec<f64>> {
+    let n = xs.len();
+    if n != ys.len() || n < 4 {
+        return None; // Not enough data points or mismatched lengths
+    }
+
+    // Create the design matrix A
+    let mut a = DMatrix::zeros(n, 4);
+    for (i, &x) in xs.iter().enumerate() {
+        a[(i, 0)] = x * x * x;
+        a[(i, 1)] = x * x;
+        a[(i, 2)] = x;
+        a[(i, 3)] = 1.0;
+    }
+
+    // Create the observation vector y
+    let y = DVector::from_column_slice(ys);
+
+    // Solve the least squares problem using SVD
+    let svd = SVD::new(a, true, true);
+    let coefficients = svd.solve(&y, 1e-10).ok()?;
+
+    
+    let mut coeffs = coefficients.as_slice().to_vec();
+    coeffs.reverse();
+    Some(coeffs)
+}
+
 
 // UNCOMMENT THIS IF YOU WANT TO USE WEBSOCKET
 // #[tokio::main]
 // async 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-    use polyfit_residuals::try_fit_poly;
-use ndarray::arr1;
-
-let xs = arr1(&[1., 2., 3., 4.]);
-let ys = arr1(&[3., 7., 13., 21.]);
-let poly =
-    try_fit_poly(xs.view(), ys.view(), 2).expect("Failed to fit linear polynomial to data");
-
-    panic!("Polyfit result: {:?}", poly);
 
     let args = Args::parse();
     let k = args.k;
     
     let mut unique_kmers: FxHashMap<Vec<u8>, bool> = FxHashMap::default();
-    let mut unique_solid_kmers = 0;
+    let mut unique_solid_kmers: u32 = 0;
+
+    // Set the debug and verbose flags
+    verbose_macros::set_debug(args.debug);
+    verbose_macros::set_verbose(args.verbose);
+
 
     // UNCOMMENT THIS IF YOU WANT TO USE WEBSOCKET
     // let (tx, rx) = mpsc::channel(100);
@@ -241,54 +238,45 @@ let poly =
 
 
     // Initialize the growth history with a single value of 0
-    let step = 5000; // step for printing the progress and computing acceleration
+    let step = 50000; // step for printing the progress and computing acceleration
 
     // vector of nb_reads_seen and nb_kmers_seen as arr1
-    let mut nb_kmers_seen_history = vec![0];
-    let mut nb_dskmers_seen_history = vec![0];
-    // let mut nb_kmers_seen_history: Vec<u64> = Vec::new();
-    // let mut nb_dskmers_seen_history: Vec<u64> = Vec::new();
-    // // push 0 0 to these vectors
-    // nb_kmers_seen_history.push(0);
-    // nb_dskmers_seen_history.push(0);
+    let mut nb_kmers_seen_history = vec![0.0];
+    let mut nb_dskmers_seen_history = vec![0.0];
+    let mut a: f64 = 0.0;
     let mut b: f64 = 0.0;
     let mut c: f64 = 0.0;
-    let mut d: f64 = 0.0;
-    let mut stop = false;
     while let Some(record) = reader.next() {
-        // println!(
-        //                     "Processed {} reads, {} kmers seen, {} unique solid kmers. ",
-        //                     nb_reads_seen, nb_kmers_seen, unique_solid_kmers
-        //                 );
-        if stop {
-            break;
-        }
+        debug!(
+                            "Processed {} reads, {} kmers seen, {} unique solid kmers. ",
+                            nb_reads_seen, nb_kmers_seen, unique_solid_kmers
+                        );
+        
         nb_reads_seen += 1;
         let seqrec = record.expect("invalid record");
         let norm_seq = seqrec.normalize(false);
         let rc = norm_seq.reverse_complement();
         for (_, kmer, _) in norm_seq.canonical_kmers(k as u8, &rc) {
-            // for debug purpose, print the k-mer in ascii, transforming the &[u8] to a string
-            // println!("Processing k-mer: {:?}", String::from_utf8_lossy(kmer));
+            debug!("Processing k-mer: {:?}", String::from_utf8_lossy(kmer));
                 nb_kmers_seen += 1;
                 match unique_kmers.get_mut(kmer) {
                         Some(seen) => {
                             if !*seen {
                                 *seen = true;
                                 unique_solid_kmers += 1;
-                                // println!(
-                                //     "Found new unique k-mer: {} (total: {})",
-                                //     String::from_utf8_lossy(kmer),
-                                //     unique_solid_kmers
-                                // );
+                                debug!(
+                                    "Found new unique k-mer: {} (total: {})",
+                                    String::from_utf8_lossy(kmer),
+                                    unique_solid_kmers
+                                );
                             }
                         }
                         None => {
                             unique_kmers.insert(kmer.to_vec(), false);
-                            // println!(
-                            //     "Inserted new k-mer: {}",
-                            //     String::from_utf8_lossy(kmer)
-                            // );
+                            debug!(
+                                "Inserted new k-mer: {}",
+                                String::from_utf8_lossy(kmer)
+                            );
                         }
                     }
                 }
@@ -296,53 +284,101 @@ let poly =
             if nb_reads_seen % step == 0 {
 
                 // push the current values 
-                nb_kmers_seen_history.push(nb_kmers_seen);
-                nb_dskmers_seen_history.push(unique_solid_kmers);
+                nb_kmers_seen_history.push(nb_kmers_seen as f64);
+                nb_dskmers_seen_history.push(unique_solid_kmers as f64);
                 
-                    println!(
+                    verbose!(
                     "Processed {} reads, {} kmers seen, {} unique solid kmers. ",
                     nb_reads_seen, nb_kmers_seen, unique_solid_kmers
                 );
-                if nb_kmers_seen_history.len() < 50 {
-                    println!("Not enough data to compute acceleration, waiting for more reads...");
+                if nb_kmers_seen_history.len() < 10 {
+                    // verbose!("Not enough data to compute acceleration, waiting for more reads...");
                     continue; // Not enough data to compute acceleration
                 }
-                // Slice the vector to get the last 50 elements
-
-                // Create a new vector `arr1_nb_kmers_seen_history` and extend it with the last 50 values
-                let arr1_nb_kmers_seen_history = &nb_kmers_seen_history[nb_kmers_seen_history.len() - 50..];
-                let arr1_nb_dskmers_seen_history = &nb_dskmers_seen_history[nb_dskmers_seen_history.len() - 50..];
-
-                use ndarray::ArrayView1;
-                // Convert u32 slices to Vec<f64>
-                let arr1_nb_kmers_seen_history_f64: Vec<f64> = arr1_nb_kmers_seen_history.iter().map(|&x| x as f64).collect();
-                let arr1_nb_dskmers_seen_history_f64: Vec<f64> = arr1_nb_dskmers_seen_history.iter().map(|&x| x as f64).collect();
-
-                let arr1_nb_kmers_seen_history = ArrayView1::from(&arr1_nb_kmers_seen_history_f64[..]);
-                let arr1_nb_dskmers_seen_history = ArrayView1::from(&arr1_nb_dskmers_seen_history_f64[..]);
-
-                println!(
-                    "{} kmers seen, {} unique solid kmers.",
-                    arr1_nb_kmers_seen_history,
-                    arr1_nb_dskmers_seen_history
-                );
-
-                let residuals: Array2<f64> = residuals_from_front(arr1_nb_kmers_seen_history, arr1_nb_kmers_seen_history, 3).unwrap();
-                // print polynomial coefficients
-                println!("y = {} + {}x + {}x^2 + {}x^3", residuals[[0, 0]], residuals[[0, 1]], residuals[[0, 2]], residuals[[0, 3]]);
-                println!("Residuals: {:?}", residuals); 
-                // // fit the model to the last 50 values
-                // (b, c, d) = fit_model(&nb_kmers_seen_history, &nb_dskmers_seen_history);
-                // TODO : get the coefficients of the polynomial
-                b = residuals[[0, 1]];
-                c = residuals[[0, 2]];
-                d = residuals[[0, 3]];
-
+                if unique_solid_kmers < 1000000 {
+                    verbose!("Not enough unique solid kmers, waiting for more reads...");
+                    continue; // Not enough unique solid kmers to compute acceleration
+                }
+                // // Create a f64 vector of the last 50 elements of nb_kmers_seen_history
+                // // let xs: Vec<f64> = nb_kmers_seen_history[nb_kmers_seen_history.len()-10..]
+                // let xs: Vec<f64> = nb_kmers_seen_history[..]
+                //     .iter()
+                //     .map(|&x| x as f64)
+                //     .collect();
                 
+                
+                // // Create a f64 vector of the last 50 elements of nb_dskmers_seen_history
+                // // let ys: Vec<f64> = nb_dskmers_seen_history[nb_kmers_seen_history.len()-10..]
+                // let ys: Vec<f64> = nb_dskmers_seen_history[..]
+                //     .iter()
+                //     .map(|&y| y as f64)
+                //     .collect();
 
-                if d.abs() < args.stop_acceleration {
-                    println!("Stop the computation as acceleration is stable.");
-                    stop = true;
+                let coefs_cube = fit_cubic(&nb_kmers_seen_history[nb_kmers_seen_history.len()-10..], &nb_dskmers_seen_history[nb_kmers_seen_history.len()-10..]);
+                if coefs_cube.is_none() {
+                    verbose!("Not enough data to compute acceleration, waiting for more reads...");
+                    continue; // Not enough data to compute acceleration
+                }
+                let coefs_cube = coefs_cube.unwrap();
+                
+                    // print polynomial coefficients
+                verbose!("y = {} + {}x + {}x^2 + {}x^3", coefs_cube[0], coefs_cube[1], coefs_cube[2], coefs_cube[3]);
+                
+                // if coefs_cube[1] < 0.0 {
+                //     if coefs_cube[1].abs() > 1e-5 {
+                //     verbose!("Non negligible negative linear coefficient detected, waiting for more reads...");
+                //     continue; // Negative acceleration, waiting for more reads
+                //     }
+                // }
+
+                if coefs_cube[2] < 0.0 {
+                    if coefs_cube[2].abs() > 1e-5 {
+                    verbose!("Non negligible negative acceleration detected, waiting for more reads...");
+                    continue; // Negative acceleration, waiting for more reads
+                    }
+                }
+                if coefs_cube[3] < 0.0 {
+                    if coefs_cube[3].abs() > 1e-5 {
+                        verbose!("Non negligible negative cubic term detected, waiting for more reads...");
+                        continue; // Cubic term is negligible, waiting for more reads
+                    }
+                }
+
+                if coefs_cube[3] < args.stop_acceleration {
+                    verbose!("Try to stop the computation as acceleration is stable.");
+                    let coefs_quad = fit_quadratic(&nb_kmers_seen_history, &nb_dskmers_seen_history);
+                    assert!(coefs_quad.is_some(), "Failed to fit quadratic model");
+                    let coefs_quad = coefs_quad.unwrap();
+                    // b is the linear coefficient, c is the quadratic coefficient
+                    // b and c cannot be negative, so we take the max of 0 and the values
+                    a = coefs_quad[0];
+                    b = coefs_quad[1];
+                    c = coefs_quad[2];
+                    verbose!("Poly2 curve found: f(kmers) = {} + {}*kmers + {}*kmers^2", a, b, c);
+                    if b < 0.0 {
+                            if b.abs() > 1e-5 {
+                            verbose!("Non negligible negative linear coefficient detected, waiting for more reads...");
+                            continue; // Linear coefficient is negative, waiting for more reads
+                        }
+                        else {
+                            b = b.abs();
+                        }
+                    }
+
+                    c = coefs_quad[2];
+
+                    if c < 0.0 {
+                        if c.abs() > 1e-10 {
+                            verbose!("Non negligible negative quadratic coefficient detected, waiting for more reads...");
+                            continue; // Quadratic coefficient is negative, waiting for more reads
+                        }
+                        else {
+                            c = c.abs();
+                        }
+                    }
+                    
+                    println!("Stable curve found: f(kmers) = {:.4} + {:.4}*kmers + {:.4}*kmers^2", a, b, c);
+
                     break;
                 }
             }
@@ -390,7 +426,7 @@ let poly =
         }
         // we can estimate the total number of kmers based on the number of reads and the reached position
     } else {
-        println!(
+        verbose!(
         "Reached position in file: {} (for {} reads, {} kmers seen), file size: {}",
         reached_position, nb_reads_seen, nb_kmers_seen, file_size
         );
@@ -407,7 +443,7 @@ let poly =
     
     // remaining reads
     let remaining_reads = total_reads - nb_reads_seen as u64;
-    println!("Remaining reads: {}", remaining_reads);
+    verbose!("Remaining reads: {}", remaining_reads);
 
     
     // Estimate the number of kmers we would have seen for the remaining reads
@@ -421,16 +457,13 @@ let poly =
     // We assume that the stable curve is in the form a +bx +cx^2
     // We can consider only bx + cx^2 for computing the number of expected remaining distinct solid kmers
     
-    // b and c cannot be negative, so we take the max of 0 and the values
-    b = b.max(0.0);
-    c = c.max(0.0);
-    // let estimated_remaining_solid_kmers =  estimated_kmers_remaining as f64 * avg_growth as f64 / step as f64;
+   // let estimated_remaining_solid_kmers =  estimated_kmers_remaining as f64 * avg_growth as f64 / step as f64;
 
-    let estimated_remaining_solid_kmers = (b * (estimated_kmers_remaining as f64)
-        + c * (estimated_kmers_remaining as f64).powi(2)) as u64;
+    let estimated_remaining_solid_kmers: u32 = (b * (estimated_kmers_remaining as f64)
+        + c * (estimated_kmers_remaining as f64).powi(2)) as u32;
 
     println!(
-        "Estimated remaining unique k-mers: {:.0} (based on recent curve f(kmers) = {:.4}kmers + {:.4}kmers each kmer)",
+        "Estimated remaining unique k-mers: {:.0} (based on recent curve f(kmers) = {:.4}kmers + {:.4}kmers^2)",
         estimated_remaining_solid_kmers, b, c
     );
     let estimated_total_distinct_canonical_kmers = unique_solid_kmers + estimated_remaining_solid_kmers;
@@ -442,6 +475,17 @@ let poly =
         "Span of distinct canonical k-mers: {:.0}",
         estimated_total_distinct_canonical_kmers.ilog2()
     );
+
+    // plot the curves
+    if nb_kmers_seen_history.len() > 10 {
+        if let Err(e) = plot_curves(&nb_kmers_seen_history, &nb_dskmers_seen_history, a, b, c) {
+            eprintln!("Error plotting curves: {}", e);
+        } else {
+            println!("Plot saved to plot.png");
+        }
+    } else {
+        println!("Not enough data to plot curves.");
+    }
 
     Ok(())
 }
