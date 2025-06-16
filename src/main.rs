@@ -1,10 +1,11 @@
+pub mod velocity_acceleration;
 use clap::Parser; 
 use std::path::PathBuf;
 use needletail::{parse_fastx_file, Sequence};
 use std::error::Error;
 use std::usize;
-use nalgebra::{DMatrix, DVector, SVD};
 use verbose_macros::{debug, verbose};
+
 
 
 // UNCOMMENT THIS IF YOU WANT TO USE WEBSOCKET
@@ -31,17 +32,19 @@ struct Args {
     input: PathBuf,
 
     /// Stop if acceleration is below or equal to this threshold
-    #[arg(long, default_value_t = 10.0)]
-    stop_acceleration: f64,
+    // #[arg(long, default_value_t = 10.0)]
+    // stop_acceleration: f64,
 
     /// Give the number of reads
     #[arg(long, default_value_t = 0)]
-    nb_reads: u64,
+    nb_reads: usize,
 
     // // UNCOMMENT THIS IF YOU WANT TO USE WEBSOCKET
     // /// Plot the intermediate results in plot.html
     // #[arg(long, default_value_t = false)]
     // plot: bool,
+
+
 
 
     /// Show progress and details
@@ -67,8 +70,8 @@ struct Args {
 //     }
 // }
 use plotters::prelude::*;
-/// plot the accumulated results y in function of x as well as the fitted (y = bx + cx^2) curves in a plot.png file
-fn plot_curves(xs: &[f64], ys: &[f64], a: f64, b: f64, c: f64) -> Result<(), Box<dyn Error>> {
+/// plot the accumulated results y in function of x as well as the fitted (y = bx + cx^2) curve (from last value of xs to maxx) in a plot.png file
+fn _plot_curves(xs: &[f64], ys: &[f64], a: f64, b: f64, c: f64, maxx:u64) -> Result<(), Box<dyn Error>> {
     let root = BitMapBackend::new("plot.png", (800, 600)).into_drawing_area();
     root.fill(&WHITE)?;
 
@@ -77,7 +80,8 @@ fn plot_curves(xs: &[f64], ys: &[f64], a: f64, b: f64, c: f64) -> Result<(), Box
         .margin(5)
         .x_label_area_size(30)
         .y_label_area_size(30)
-        .build_cartesian_2d(0f64..*xs.last().unwrap(), 0f64..*ys.last().unwrap())?;
+        // .build_cartesian_2d(0f64..*xs.last().unwrap(), 0f64..*ys.last().unwrap())?;
+        .build_cartesian_2d(0f64..*xs.last().unwrap(), 0f64..maxx as f64)?;
 
     chart
         .configure_mesh()
@@ -86,16 +90,21 @@ fn plot_curves(xs: &[f64], ys: &[f64], a: f64, b: f64, c: f64) -> Result<(), Box
         .draw()?;
 
     // Plot the data points
-    chart.draw_series(LineSeries::new(
-        xs.iter().zip(ys.iter()).map(|(&x, &y)| (x, y)),
-        &RED,
-    ))?;
+    // chart.draw_series(LineSeries::new(
+    //     xs.iter().zip(ys.iter()).map(|(&x, &y)| (x, y)),
+    //     &RED,
+    // ))?;
 
     // Plot the fitted curve
+    let last_xs = *xs.last().unwrap() as u64;
     chart.draw_series(LineSeries::new(
-        xs.iter().map(|&x| (x, a + b * x + c * x.powi(2))),
+        (last_xs..=maxx).map(|x| x as f64).zip(
+            (last_xs..=maxx)
+                .map(|x| a + b * x as f64 + c * (x as f64).powi(2))
+        ),
         &BLUE,
     ))?;
+        
 
     root.present()?;
     Ok(())
@@ -137,64 +146,6 @@ fn read_idx_records_and_get_position(path: &PathBuf, idx: usize) -> Result<u64, 
     Ok(position as u64)
 }
 
-// Fit a quadratic a + bx + cx¨2 polynomial to the given x and y data points using least squares
-// Returns the coefficients [a, b, c] if successful, or None if the input is invalid
-fn fit_quadratic(xs: &[f64], ys: &[f64]) -> Option<Vec<f64>> {
-    let n = xs.len();
-    if n != ys.len() || n < 3 {
-        return None; // Not enough data points or mismatched lengths
-    }
-
-    // Create the design matrix A
-    let mut a = DMatrix::zeros(n, 3);
-    for (i, &x) in xs.iter().enumerate() {
-        a[(i, 0)] = x * x;
-        a[(i, 1)] = x;
-        a[(i, 2)] = 1.0;
-    }
-
-    // Create the observation vector y
-    let y = DVector::from_column_slice(ys);
-
-    // Solve the least squares problem using SVD
-    let svd = SVD::new(a, true, true);
-    let coefficients = svd.solve(&y, 1e-10).ok()?;
-
-    let mut coeffs = coefficients.as_slice().to_vec();
-    coeffs.reverse();
-    Some(coeffs)
-}
-
-
-fn fit_cubic(xs: &[f64], ys: &[f64]) -> Option<Vec<f64>> {
-    let n = xs.len();
-    if n != ys.len() || n < 4 {
-        return None; // Not enough data points or mismatched lengths
-    }
-
-    // Create the design matrix A
-    let mut a = DMatrix::zeros(n, 4);
-    for (i, &x) in xs.iter().enumerate() {
-        a[(i, 0)] = x * x * x;
-        a[(i, 1)] = x * x;
-        a[(i, 2)] = x;
-        a[(i, 3)] = 1.0;
-    }
-
-    // Create the observation vector y
-    let y = DVector::from_column_slice(ys);
-
-    // Solve the least squares problem using SVD
-    let svd = SVD::new(a, true, true);
-    let coefficients = svd.solve(&y, 1e-10).ok()?;
-
-    
-    let mut coeffs = coefficients.as_slice().to_vec();
-    coeffs.reverse();
-    Some(coeffs)
-}
-
-
 // UNCOMMENT THIS IF YOU WANT TO USE WEBSOCKET
 // #[tokio::main]
 // async 
@@ -205,7 +156,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let k = args.k;
     
     let mut unique_kmers: FxHashMap<Vec<u8>, bool> = FxHashMap::default();
-    let mut unique_solid_kmers: u32 = 0;
+    let mut unique_solid_kmers: usize = 0;
 
     // Set the debug and verbose flags
     verbose_macros::set_debug(args.debug);
@@ -233,7 +184,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let mut reader = parse_fastx_file(&args.input).expect("valid path/file");
     // let mut reader = fxread::initialize_reader(&args.input)?;
-    let mut nb_kmers_seen: u32 = 0;
+    let mut nb_kmers_seen: usize = 0;
     let mut nb_reads_seen: usize = 0;
 
 
@@ -241,11 +192,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let step = 50000; // step for printing the progress and computing acceleration
 
     // vector of nb_reads_seen and nb_kmers_seen as arr1
-    let mut nb_kmers_seen_history = vec![0.0];
-    let mut nb_dskmers_seen_history = vec![0.0];
-    let mut a: f64 = 0.0;
-    let mut b: f64 = 0.0;
-    let mut c: f64 = 0.0;
+    let mut nb_kmers_seen_history: Vec<usize> = vec![0];
+    let mut nb_dskmers_seen_history: Vec<usize> = vec![0];
+    let mut b: f32 = 0.0;
+    let mut c: f32 = 0.0;
     while let Some(record) = reader.next() {
         debug!(
                             "Processed {} reads, {} kmers seen, {} unique solid kmers. ",
@@ -284,8 +234,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if nb_reads_seen % step == 0 {
 
                 // push the current values 
-                nb_kmers_seen_history.push(nb_kmers_seen as f64);
-                nb_dskmers_seen_history.push(unique_solid_kmers as f64);
+                nb_kmers_seen_history.push(nb_kmers_seen);
+                nb_dskmers_seen_history.push(unique_solid_kmers);
                 
                     verbose!(
                     "Processed {} reads, {} kmers seen, {} unique solid kmers. ",
@@ -299,64 +249,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     verbose!("Not enough unique solid kmers, waiting for more reads...");
                     continue; // Not enough unique solid kmers to compute acceleration
                 }
-                // // Create a f64 vector of the last 50 elements of nb_kmers_seen_history
-                // // let xs: Vec<f64> = nb_kmers_seen_history[nb_kmers_seen_history.len()-10..]
-                // let xs: Vec<f64> = nb_kmers_seen_history[..]
-                //     .iter()
-                //     .map(|&x| x as f64)
-                //     .collect();
-                
-                
-                // // Create a f64 vector of the last 50 elements of nb_dskmers_seen_history
-                // // let ys: Vec<f64> = nb_dskmers_seen_history[nb_kmers_seen_history.len()-10..]
-                // let ys: Vec<f64> = nb_dskmers_seen_history[..]
-                //     .iter()
-                //     .map(|&y| y as f64)
-                //     .collect();
 
-                let coefs_cube = fit_cubic(&nb_kmers_seen_history[nb_kmers_seen_history.len()-10..], &nb_dskmers_seen_history[nb_kmers_seen_history.len()-10..]);
-                if coefs_cube.is_none() {
-                    verbose!("Not enough data to compute acceleration, waiting for more reads...");
-                    continue; // Not enough data to compute acceleration
-                }
-                let coefs_cube = coefs_cube.unwrap();
-                
-                    // print polynomial coefficients
-                verbose!("y = {} + {}x + {}x^2 + {}x^3", coefs_cube[0], coefs_cube[1], coefs_cube[2], coefs_cube[3]);
-                
-                // if coefs_cube[1] < 0.0 {
-                //     if coefs_cube[1].abs() > 1e-5 {
-                //     verbose!("Non negligible negative linear coefficient detected, waiting for more reads...");
-                //     continue; // Negative acceleration, waiting for more reads
-                //     }
-                // }
+                let (avg_growth, avg_acceleration) = velocity_acceleration::compute_accelerations(
+                    &nb_kmers_seen_history,
+                    &nb_dskmers_seen_history,
+                    10
+                );
+                verbose!(
+                    "Average growth: {:.2}, Average acceleration: {:.2}",
+                    avg_growth, avg_acceleration
+                );
 
-                if coefs_cube[2] < 0.0 {
-                    if coefs_cube[2].abs() > 1e-5 {
-                    verbose!("Non negligible negative acceleration detected, waiting for more reads...");
-                    continue; // Negative acceleration, waiting for more reads
-                    }
-                }
-                if coefs_cube[3] < 0.0 {
-                    if coefs_cube[3].abs() > 1e-5 {
-                        verbose!("Non negligible negative cubic term detected, waiting for more reads...");
-                        continue; // Cubic term is negligible, waiting for more reads
-                    }
-                }
 
-                if coefs_cube[3] < args.stop_acceleration {
-                    verbose!("Try to stop the computation as acceleration is stable.");
-                    let coefs_quad = fit_quadratic(&nb_kmers_seen_history[nb_kmers_seen_history.len()-10..], &nb_dskmers_seen_history[nb_kmers_seen_history.len()-10..]);
-                    assert!(coefs_quad.is_some(), "Failed to fit quadratic model");
-                    let coefs_quad = coefs_quad.unwrap();
-                    // b is the linear coefficient, c is the quadratic coefficient
-                    // b and c cannot be negative, so we take the max of 0 and the values
-                    a = coefs_quad[0];
-                    b = coefs_quad[1];
-                    c = coefs_quad[2];
-                    verbose!("Poly2 curve found: f(kmers) = {} + {}*kmers + {}*kmers^2", a, b, c);
+                
+                    b = avg_growth;
+                    c = avg_acceleration;
+                    verbose!("Poly2 curve found: f(kmers) = ? + {}*kmers + {}*kmers^2", b, c);
                     if b < 0.0 {
-                            if b.abs() > 1e-5 {
+                            if b.abs() > 1e-4 {
                             verbose!("Non negligible negative linear coefficient detected, waiting for more reads...");
                             continue; // Linear coefficient is negative, waiting for more reads
                         }
@@ -365,11 +275,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
 
-                    c = coefs_quad[2];
 
                     if c < 0.0 {
-                        if c.abs() > 1e-10 {
-                            verbose!("Non negligible negative quadratic coefficient detected, waiting for more reads...");
+                        if c.abs() > 1e-4 {
+                            verbose!("Non negligible negative quadratic coefficient detected ({}), waiting for more reads...", c);
                             continue; // Quadratic coefficient is negative, waiting for more reads
                         }
                         else {
@@ -377,11 +286,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     
-                    println!("Stable curve found: f(kmers) = {:.4} + {:.4}*kmers + {:.4}*kmers^2", a, b, c);
+                    println!("Stable curve found: f(kmers) = {:.4}*kmers + {:.4}*kmers^2", b, c);
 
                     break;
                 }
-            }
+            
         
 
     }
@@ -395,7 +304,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Average distinct canonical kmers seen per kmer read: {:.2}",
         unique_solid_kmers as f64 / nb_kmers_seen as f64
     );
-    let avg_kmers_seen_per_read = nb_kmers_seen as f64 / nb_reads_seen as f64;
+    let avg_kmers_seen_per_read: f64 = nb_kmers_seen as f64 / nb_reads_seen as f64;
     println!(
         "Average total kmers seen per read: {:.2}",
         avg_kmers_seen_per_read
@@ -414,7 +323,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file_size = args.input.metadata()?.len();
 
     
-    let mut total_reads = args.nb_reads;
+    let mut total_reads: usize = args.nb_reads;
 
     // if the number of reads is given, we can estimate the total number of distinct canonical kmers
     if total_reads > 0 {
@@ -430,7 +339,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Reached position in file: {} (for {} reads, {} kmers seen), file size: {}",
         reached_position, nb_reads_seen, nb_kmers_seen, file_size
         );
-        total_reads = (file_size as f64 / reached_position as f64 * nb_reads_seen as f64) as u64;
+        total_reads = (file_size as f64 / reached_position as f64 * nb_reads_seen as f64) as usize;
         
         println!(
             "Estimated total reads: {}",
@@ -442,16 +351,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // we use the last avg growth value to estimate the remaining kmers
     
     // remaining reads
-    let remaining_reads = total_reads - nb_reads_seen as u64;
+    let remaining_reads: usize = total_reads - nb_reads_seen;
     verbose!("Remaining reads: {}", remaining_reads);
 
     
     // Estimate the number of kmers we would have seen for the remaining reads
-    let estimated_kmers_remaining = (remaining_reads as f64 * avg_kmers_seen_per_read) as u32;
+    let estimated_kmers_remaining: usize = (remaining_reads as f64 * avg_kmers_seen_per_read) as usize;
     println!(
         "Estimated total kmers remaining: {} (based on average total kmers seen per read)",
         estimated_kmers_remaining
     );
+
+    // need to know the average growth per step, that is the average of 
+    // the successive differences in nb_kmers_seen
+    let mut avg_growth: f32 = 0.0;
+    if nb_kmers_seen_history.len() > 1 {
+        let mut total_growth: f32 = 0.0;
+        for i in 1..nb_kmers_seen_history.len() {
+            total_growth += (nb_kmers_seen_history[i] - nb_kmers_seen_history[i - 1]) as f32;
+        }
+        avg_growth = total_growth / (nb_kmers_seen_history.len() - 1) as f32;
+    } else {
+        println!("\x1b[93mNot enough data to compute average growth, using 0.\x1b[0m");
+    }
+
 
     // As we know estimated_kmers_remaining, and we know the growth per step kmers, we can estimate the remaining unique kmers
     // We assume that the stable curve is in the form a +bx +cx^2
@@ -459,8 +382,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
    // let estimated_remaining_solid_kmers =  estimated_kmers_remaining as f64 * avg_growth as f64 / step as f64;
 
-    let estimated_remaining_solid_kmers: u32 = (b * (estimated_kmers_remaining as f64)
-        + c * (estimated_kmers_remaining as f64).powi(2)) as u32;
+    let estimated_remaining_solid_kmers: usize = ((b * estimated_kmers_remaining as f32
+        + c * (estimated_kmers_remaining as f32).powi(2) as f32) / avg_growth) as usize ;
+
+    let estimated_total_kmers = nb_kmers_seen + estimated_kmers_remaining;
 
     println!(
         "Estimated remaining unique k-mers: {:.0} (based on recent curve f(kmers) = {:.4}kmers + {:.4}kmers^2)",
@@ -476,16 +401,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         estimated_total_distinct_canonical_kmers.ilog2()
     );
 
-    // plot the curves
-    if nb_kmers_seen_history.len() > 10 {
-        if let Err(e) = plot_curves(&nb_kmers_seen_history, &nb_dskmers_seen_history, a, b, c) {
-            eprintln!("Error plotting curves: {}", e);
-        } else {
-            println!("Plot saved to plot.png");
-        }
-    } else {
-        println!("Not enough data to plot curves.");
-    }
+    // // plot the curves
+    // if nb_kmers_seen_history.len() > 10 {
+    //     // Convert Vec<usize> to Vec<f64> for plotting
+    //     let nb_kmers_seen_history_f64: Vec<f64> = nb_kmers_seen_history.iter().map(|&x| x as f64).collect();
+    //     let nb_dskmers_seen_history_f64: Vec<f64> = nb_dskmers_seen_history.iter().map(|&x| x as f64).collect();
+    //     if let Err(e) = _plot_curves(
+    //         &nb_kmers_seen_history_f64,
+    //         &nb_dskmers_seen_history_f64,
+    //         unique_solid_kmers as f64,
+    //         (b / avg_growth as f32) as f64,
+    //         c as f64,
+    //         estimated_total_kmers as u64
+    //     ) {
+    //         eprintln!("Error plotting curves: {}", e);
+    //     } else {
+    //         println!("Plot saved to plot.png");
+    //     }
+    // } else {
+    //     println!("Not enough data to plot curves.");
+    // }
 
     Ok(())
 }
