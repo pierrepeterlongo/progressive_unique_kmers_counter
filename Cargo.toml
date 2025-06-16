@@ -4,14 +4,8 @@ version = "0.1.1"
 edition = "2024"
 
 [dependencies]
-bio = "2.3.0"
 clap = { version = "4.0", features = ["derive"] }
-tokio = { version = "1.0", features = ["full"] }
-warp = "0.3"
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
 rustc-hash = "2.1.1"
-flate2 = "1.0"
-fxread = "0.2.14"
 needletail = "0.6.3"
 verbose-macros = "0.1"
 plotters = "0.3.0"

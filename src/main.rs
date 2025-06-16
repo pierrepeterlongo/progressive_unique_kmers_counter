@@ -90,10 +90,10 @@ fn _plot_curves(xs: &[f64], ys: &[f64], a: f64, b: f64, c: f64, maxx:u64) -> Res
         .draw()?;
 
     // Plot the data points
-    // chart.draw_series(LineSeries::new(
-    //     xs.iter().zip(ys.iter()).map(|(&x, &y)| (x, y)),
-    //     &RED,
-    // ))?;
+    chart.draw_series(LineSeries::new(
+        xs.iter().zip(ys.iter()).map(|(&x, &y)| (x, y)),
+        &RED,
+    ))?;
 
     // Plot the fitted curve
     let last_xs = *xs.last().unwrap() as u64;
@@ -385,7 +385,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let estimated_remaining_solid_kmers: usize = ((b * estimated_kmers_remaining as f32
         + c * (estimated_kmers_remaining as f32).powi(2) as f32) / avg_growth) as usize ;
 
-    let estimated_total_kmers = nb_kmers_seen + estimated_kmers_remaining;
 
     println!(
         "Estimated remaining unique k-mers: {:.0} (based on recent curve f(kmers) = {:.4}kmers + {:.4}kmers^2)",
