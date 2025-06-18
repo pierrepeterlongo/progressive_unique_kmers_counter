@@ -8,7 +8,7 @@ clap = { version = "4.0", features = ["derive"] }
 rustc-hash = "2.1.1"
 needletail = "0.6.3"
 verbose-macros = "0.1"
-plotters = "0.3.0"
+
 
 
 
