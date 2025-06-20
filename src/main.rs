@@ -187,7 +187,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut b: f32 = 0.0;
     let mut c: f32 = 0.0;
     let mut nb_stable_curves_found: usize = 0;
-    let nb_stable_curves_found_target: usize = 10; // number of stable curves to find before stopping
+    let nb_stable_curves_found_target: usize = 20; // number of stable curves to find before stopping
     while let Some(record) = reader.next() {
         
         
