@@ -34,7 +34,9 @@ struct Args {
     // #[arg(long, default_value_t = false)]
     // plot: bool,
     
-    
+    /// Target number of stable curves to find before stopping
+    #[arg(long, default_value_t = 20)]
+    nb_stable_curves_found_target: usize,
     
     
     /// Show progress and details
@@ -187,11 +189,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut b: f32 = 0.0;
     let mut c: f32 = 0.0;
     let mut nb_stable_curves_found: usize = 0;
-    let nb_stable_curves_found_target: usize = 20; // number of stable curves to find before stopping
+    // let nb_stable_curves_found_target: usize = 20; // number of stable curves to find before stopping
     while let Some(record) = reader.next() {
         
         
-        if nb_stable_curves_found == nb_stable_curves_found_target {
+        if nb_stable_curves_found == args.nb_stable_curves_found_target {
             break;
         }
         debug!(
@@ -255,17 +257,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 
                 verbose!("Poly2 curve found: f(kmers) = ? + {}*kmers + {}*kmers^2", b, c);
                 if c > 1e-5 {
-                    verbose!("Non negligible positive quadratic coefficient detected ({}), waiting for more reads...", c);
+                    debug!("Non negligible positive quadratic coefficient detected ({}), waiting for more reads...", c);
                     continue; // Quadratic coefficient is negative, waiting for more reads
                 }
                 if c < 0.0 && c < -1e-4 {
-                    verbose!("Non negligible negative quadratic coefficient detected ({}), waiting for more reads...", c);
+                    debug!("Non negligible negative quadratic coefficient detected ({}), waiting for more reads...", c);
                     continue; // Quadratic coefficient is negative, waiting for more reads
                 }
                 
                 if b < 0.0 {
                     if b.abs() > 1e-4 {
-                        verbose!("Non negligible negative linear coefficient detected, waiting for more reads...");
+                        debug!("Non negligible negative linear coefficient detected, waiting for more reads...");
                         continue; // Linear coefficient is negative, waiting for more reads
                     }
                     else {
@@ -274,7 +276,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 nb_stable_curves_found += 1;
                 verbose!("Stable curve found {}/{}: f(kmers) = ? + {}*kmers + {}*kmers^2", 
-                    nb_stable_curves_found, nb_stable_curves_found_target, b, c);
+                    nb_stable_curves_found, args.nb_stable_curves_found_target, b, c);
                 
                 break;
             }
