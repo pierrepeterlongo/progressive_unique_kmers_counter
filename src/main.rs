@@ -183,13 +183,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize the growth history with a single value of 0
     let step = 100000; // step for printing the progress and computing acceleration
     
-    // vector of nb_reads_seen and nb_kmers_seen as arr1
+    // vector of number of kmers seen at each step
+    // and number of distinct solid kmers seen at each step
     let mut nb_kmers_seen_history: Vec<usize> = vec![0];
     let mut nb_dskmers_seen_history: Vec<usize> = vec![0];
-    let mut b: f32 = 0.0;
-    let mut c: f32 = 0.0;
+    // vector of growth values
+    let mut growth_history: Vec<f32> = vec![0.0];
+    // let mut b: f32 = 0.0;
+    // let mut c: f32 = 0.0;
     let mut nb_stable_curves_found: usize = 0;
     // let nb_stable_curves_found_target: usize = 20; // number of stable curves to find before stopping
+    // TODO paralelize the processing of reads
     while let Some(record) = reader.next() {
         
         
@@ -208,6 +212,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         
         for (_, kmer, _) in norm_seq.canonical_kmers(k as u8, &rc) {
             debug!("Processing k-mer: {:?}", String::from_utf8_lossy(kmer));
+            // TODO transform the kmer to 2 bits per base (A=00, C=01, G=10, T=11)
             nb_kmers_seen += 1;
             match unique_kmers.get_mut(kmer) {
                 Some(seen) => {
@@ -244,7 +249,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     continue; // Not enough data to compute acceleration
                 }
                 
-                let (avg_growth, avg_acceleration) = velocity_acceleration::compute_accelerations(
+                let (mut avg_growth, avg_acceleration) = velocity_acceleration::compute_accelerations(
                     &nb_kmers_seen_history,
                     &nb_dskmers_seen_history,
                     10
@@ -252,40 +257,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 
                 
                 
-                b = avg_growth;
-                c = avg_acceleration;
+                // b = avg_growth;
+                // c = avg_acceleration;
+                growth_history.push(avg_growth);
                 
-                verbose!("Poly2 curve found: f(kmers) = ? + {}*kmers + {}*kmers^2", b, c);
-                if c > 1e-5 {
-                    debug!("Non negligible positive quadratic coefficient detected ({}), waiting for more reads...", c);
+                verbose!("Poly2 curve found: f(kmers) = ? + {}*kmers + {}*kmers^2", avg_growth, avg_acceleration);
+                if avg_acceleration > 1e-5 {
+                    debug!("Non negligible positive quadratic coefficient detected ({}), waiting for more reads...", avg_acceleration);
                     continue; // Quadratic coefficient is negative, waiting for more reads
                 }
-                if c < 0.0 && c < -1e-4 {
-                    debug!("Non negligible negative quadratic coefficient detected ({}), waiting for more reads...", c);
+                if avg_acceleration < 0.0 && avg_acceleration < -1e-4 {
+                    debug!("Non negligible negative quadratic coefficient detected ({}), waiting for more reads...", avg_acceleration);
                     continue; // Quadratic coefficient is negative, waiting for more reads
                 }
                 
-                if b < 0.0 {
-                    if b.abs() > 1e-4 {
+                if avg_growth < 0.0 {
+                    if avg_growth.abs() > 1e-4 {
                         debug!("Non negligible negative linear coefficient detected, waiting for more reads...");
                         continue; // Linear coefficient is negative, waiting for more reads
                     }
                     else {
-                        b = b.abs();
+                        avg_growth = avg_growth.abs();
                     }
                 }
                 nb_stable_curves_found += 1;
                 verbose!("Stable curve found {}/{}: f(kmers) = ? + {}*kmers + {}*kmers^2", 
-                    nb_stable_curves_found, args.nb_stable_curves_found_target, b, c);
+                    nb_stable_curves_found, args.nb_stable_curves_found_target, avg_growth, avg_acceleration);
                 
                 break;
             }
         }
-        
-        
-        
-        
-        
     }
     println!(
         "Final unique k-mers: {}, after processing {} kmers.",
@@ -362,17 +363,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // We assume that the stable curve is in the form a +bx +cx^2
     // We can consider only bx + cx^2 for computing the number of expected remaining distinct solid kmers
     
-    
-    let estimated_remaining_solid_kmers: usize = (b * estimated_kmers_remaining as f32) as usize;
+    // We consider the used growth as the last 20 values of the growth history
+    // TODO : use a better interpolation method to estimate the averag growth
+    // for instance linear interpolation or polynomial interpolation
+    use interp::{interp, InterpMode};
+    // x is the last 100 values of the nb_kmers_seen_history (or less if there are not enough values)
+    let x: Vec<f32> = nb_kmers_seen_history.iter().rev().take(100).map(|&x| x as f32).collect();
+    // y is the last 100 values of the unique_solid_kmers history (or less if there are not enough values)
+    let y: Vec<f32> = nb_dskmers_seen_history.iter().rev().take(100).map(|&y| y as f32).collect();
+    // We can use the interp function to compute the average growth
+    let interpolated_number_of_kmers = interp(&x, &y, (nb_kmers_seen + estimated_kmers_remaining) as f32, &InterpMode::default());
+
+    let used_avg_growth: f32 = growth_history.iter().rev().take(20).sum::<f32>() / 10.0;
+
+    let estimated_remaining_solid_kmers: usize = (used_avg_growth * estimated_kmers_remaining as f32) as usize;
     
     verbose!(
-        "Estimated remaining unique k-mers: {:.0} (based on recent curve f(kmers) = {}kmers)",
-        estimated_remaining_solid_kmers, b
+        "Estimated remaining unique k-mers: {:.0} (based on recent curve f(kmers) = {}*kmers)",
+        estimated_remaining_solid_kmers, used_avg_growth
     );
     let estimated_total_distinct_canonical_kmers = unique_solid_kmers + estimated_remaining_solid_kmers;
     println!(
         "Estimated total distinct canonical k-mers: {:.0}",
         estimated_total_distinct_canonical_kmers
+    );
+    println!(
+        "Estimated total distinct canonical using interp: {:.0}",
+        interpolated_number_of_kmers
     );
     
     // show the span (|log2(unique_solid_kmers)|)

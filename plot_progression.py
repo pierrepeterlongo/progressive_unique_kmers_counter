@@ -54,10 +54,16 @@ def main(input_file_path):
     
     # Plotting on the same graph the tendency line: with x from last_nb_kmers_seen to total_estimated_kmers
     # with the plot: f(x)= last_nb_kmers_seen + growth * (x - last_nb_kmers_seen)
-    total_estimated_kmers = last_nb_kmers_seen + 10000000
+    range_estimation = last_nb_kmers_seen // 3 # 33% of the last nb kmers seen
+    total_estimated_kmers = last_nb_kmers_seen + range_estimation
     x_values = range(last_nb_kmers_seen, total_estimated_kmers + 1, 100000)
     y_values = [last_nb_unique_kmers + growth * (x - last_nb_kmers_seen) for x in x_values]
     plt.plot(x_values, y_values, color='red', linestyle='--', label='Estimated growth trend')
+    
+    # also plot the estimated f(x) from last_nb_kmers_seen - range_estimation
+    x_values_estimated = range(last_nb_kmers_seen - range_estimation, last_nb_kmers_seen + 1, 100000)
+    y_values_estimated = [last_nb_unique_kmers + growth * (x - last_nb_kmers_seen) for x in x_values_estimated]
+    plt.plot(x_values_estimated, y_values_estimated, color='green', linestyle='--', label='Estimated growth trend (before)')
     
     plt.savefig(f'{file_name}_kmers_plot.png')
     print(f"Plot saved as {file_name}_kmers_plot.png")
