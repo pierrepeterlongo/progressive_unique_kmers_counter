@@ -147,6 +147,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let args = Args::parse();
     let k = args.k;
+    if k < 1 || k > 32 {
+        return Err("k must be between 1 and 32".into());
+    }
     
     let mut unique_kmers: FxHashMap<u64, bool> = FxHashMap::default();
     let mut unique_solid_kmers: usize = 0;
