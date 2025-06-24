@@ -35,7 +35,7 @@ struct Args {
     // plot: bool,
     
     /// Target number of stable curves to find before stopping
-    #[arg(long, default_value_t = 20)]
+    #[arg(long, default_value_t = 10)]
     nb_stable_curves_found_target: usize,
     
     
@@ -181,7 +181,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     
     // Initialize the growth history with a single value of 0
-    let step = 100000; // step for printing the progress and computing acceleration
+    let step = 500000; // step for printing the progress and computing acceleration
     
     // vector of number of kmers seen at each step
     // and number of distinct solid kmers seen at each step
@@ -367,10 +367,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // TRY LINEAR INTERPOLATION: use a better interpolation method to estimate the averag growth
     // for instance linear interpolation or polynomial interpolation
     use interp::{interp, InterpMode};
-    // x is the last 20 values of the nb_kmers_seen_history (or less if there are not enough values)
-    let x: Vec<f32> = nb_kmers_seen_history.iter().rev().take(20).map(|&x| x as f32).collect();
-    // y is the last 100 values of the unique_solid_kmers history (or less if there are not enough values)
-    let y: Vec<f32> = nb_dskmers_seen_history.iter().rev().take(20).map(|&y| y as f32).collect();
+    // x is the last 50 values of the nb_kmers_seen_history (or less if there are not enough values)
+    let x: Vec<f32> = nb_kmers_seen_history.iter().rev().take(50).map(|&x| x as f32).collect();
+    // y is the last 50 values of the unique_solid_kmers history (or less if there are not enough values)
+    let y: Vec<f32> = nb_dskmers_seen_history.iter().rev().take(50).map(|&y| y as f32).collect();
     // We can use the interp function to compute the average growth
     let interpolated_number_of_kmers = interp(&x, &y, (nb_kmers_seen + estimated_kmers_remaining) as f32, &InterpMode::default());
     println!(
@@ -378,21 +378,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         interpolated_number_of_kmers
     );
 
-    // // TRY POLYNOMIAL INTERPOLATION: use a polynomial interpolation to estimate the average growth
-    // use polynominal_interpolation;
-    // // create a vector xs composed of nb_kmers_seen_history as f64
-    // let xs: Vec<f64> = nb_kmers_seen_history.iter().rev().take(20).map(|&x| x as f64).collect::<Vec<_>>().into_iter().rev().collect();
-    // // create a vector ys composed of nb_dskmers_seen_history as f64
-    // let ys: Vec<f64> = nb_dskmers_seen_history.iter().rev().take(20).map(|&x| x as f64).collect::<Vec<_>>().into_iter().rev().collect();
-    // let f = polynominal_interpolation::newton_interpolation(xs, ys);
-    // let estimated_distinct_kmers = f((nb_kmers_seen + estimated_kmers_remaining) as f64);
-    // println!(
-    //     "Estimated total distinct canonical using polynomial interpolation: {:.0}",
-    //     estimated_distinct_kmers
-    // );
 
 
-    let used_avg_growth: f32 = growth_history.iter().rev().take(20).sum::<f32>() / 10.0;
+    let used_avg_growth: f32 = growth_history.iter().rev().take(50).sum::<f32>() / 50.0;
 
     let estimated_remaining_solid_kmers: usize = (used_avg_growth * estimated_kmers_remaining as f32) as usize;
     

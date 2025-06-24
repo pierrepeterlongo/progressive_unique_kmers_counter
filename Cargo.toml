@@ -9,7 +9,7 @@ rustc-hash = "2.1.1"
 needletail = "0.6.3"
 verbose-macros = "0.1"
 interp = "2.1.1"
-polynominal-interpolation = "1.0.1"
+
 
 
 
