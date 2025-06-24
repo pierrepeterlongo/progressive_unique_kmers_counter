@@ -378,18 +378,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         interpolated_number_of_kmers
     );
 
-    // TRY POLYNOMIAL INTERPOLATION: use a polynomial interpolation to estimate the average growth
-    use polynominal_interpolation;
-    // create a vector xs composed of nb_kmers_seen_history as f64
-    let xs: Vec<f64> = nb_kmers_seen_history.iter().rev().take(20).map(|&x| x as f64).collect::<Vec<_>>().into_iter().rev().collect();
-    // create a vector ys composed of nb_dskmers_seen_history as f64
-    let ys: Vec<f64> = nb_dskmers_seen_history.iter().rev().take(20).map(|&x| x as f64).collect::<Vec<_>>().into_iter().rev().collect();
-    let f = polynominal_interpolation::newton_interpolation(xs, ys);
-    let estimated_distinct_kmers = f((nb_kmers_seen + estimated_kmers_remaining) as f64);
-    println!(
-        "Estimated total distinct canonical using polynomial interpolation: {:.0}",
-        estimated_distinct_kmers
-    );
+    // // TRY POLYNOMIAL INTERPOLATION: use a polynomial interpolation to estimate the average growth
+    // use polynominal_interpolation;
+    // // create a vector xs composed of nb_kmers_seen_history as f64
+    // let xs: Vec<f64> = nb_kmers_seen_history.iter().rev().take(20).map(|&x| x as f64).collect::<Vec<_>>().into_iter().rev().collect();
+    // // create a vector ys composed of nb_dskmers_seen_history as f64
+    // let ys: Vec<f64> = nb_dskmers_seen_history.iter().rev().take(20).map(|&x| x as f64).collect::<Vec<_>>().into_iter().rev().collect();
+    // let f = polynominal_interpolation::newton_interpolation(xs, ys);
+    // let estimated_distinct_kmers = f((nb_kmers_seen + estimated_kmers_remaining) as f64);
+    // println!(
+    //     "Estimated total distinct canonical using polynomial interpolation: {:.0}",
+    //     estimated_distinct_kmers
+    // );
 
 
     let used_avg_growth: f32 = growth_history.iter().rev().take(20).sum::<f32>() / 10.0;
