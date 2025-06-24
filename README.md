@@ -67,11 +67,21 @@ pukc --k 25 --input /tmp/SRR33792312.fasta.gz  --nb-reads 2113824
 
 ...
 
-Estimated total unique k-mers: 5642838
+Estimated total unique k-mers: 7431136
 ```
 
 - Note1: this execution takes approximately 2s. 
-- Note2: the exact number of distinct solide 25-mers in this file is in fact 5239190.
+- Note2: the exact number of distinct solide 25-mers in this file is in fact 5239190. Pukc tends to surestimate the results.
 
 ## Visualization
-- Using the `--plot` option **visualize** the evolution of the results opening file `plot.html` in a browser (reload the page once the program runs)
+- Redirect logs to a file: 
+```bash
+pukc --k 25 --input /tmp/SRR33792312.fasta.gz  --nb-reads 2113824 > logs.txt
+```
+- Plot figure: 
+```bash
+python plot_progression.py logs.txt
+```
+- Generated figure: 
+
+TODO
