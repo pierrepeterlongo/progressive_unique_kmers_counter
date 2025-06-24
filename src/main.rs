@@ -216,7 +216,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         
         for (_, kmer, _) in norm_seq.canonical_kmers(k as u8, &rc) {
             debug!("Processing k-mer: {:?}", String::from_utf8_lossy(kmer));
-            // TODO transform the kmer to 2 bits per base (A=00, C=01, G=10, T=11)
             nb_kmers_seen += 1;
             match unique_kmers.get_mut(&as_2bit(kmer).expect("valid k-mer")) {
                 Some(seen) => {
