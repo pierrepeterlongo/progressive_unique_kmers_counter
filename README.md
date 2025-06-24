@@ -60,28 +60,39 @@ pukc --k 25 --input input.fq
 - Then the number of kmers is extrapolated 
 
 ## Full example.
-1/ Download the fasta.gz or fastq.gz entry from [SRR33792312](https://trace.ncbi.nlm.nih.gov/Traces/?view=run_browser&acc=SRR33792312&display=metadata). This file contains 2.2M reads (2113824 precisely).
+1/ Download the fasta.gz or fastq.gz entry from [SRR33792312](https://trace.ncbi.nlm.nih.gov/Traces/?view=run_browser&acc=SRR33792312&display=metadata). This file contains 1M reads (1056912 precisely).
+
+`fastq-dump` comes with [sra-toolkit](https://github.com/ncbi/sra-tools/wiki/01.-Downloading-SRA-Toolkit).
+```bash
+aws s3 cp --no-sign-request s3://sra-pub-run-odp/sra/SRR33792312/SRR33792312 .
+fastq-dump ./SRR33792312
+```
 2/ Run :
 ```bash
-pukc --k 25 --input /tmp/SRR33792312.fasta.gz  --nb-reads 2113824
+pukc --k 25 --input SRR33792312.fastq  --nb-reads 1056912
 
 ...
 
-Estimated total unique k-mers: 7431136
+Estimated total distinct canonical k-mers: 9050275
 ```
 
 - Note1: this execution takes approximately 2s. 
-- Note2: the exact number of distinct solide 25-mers in this file is in fact 5239190. Pukc tends to surestimate the results.
+- Note2: the exact number of distinct solid 25-mers in this file is in fact 7464083. Pukc tends to surestimate the results.
 
 ## Visualization
-- Redirect logs to a file: 
+- Redirect logs (using the verbose `-v` option) to a file: 
 ```bash
-pukc --k 25 --input /tmp/SRR33792312.fasta.gz  --nb-reads 2113824 > logs.txt
+pukc --k 25 --input SRR33792312.fastq  --nb-reads 1056912 -v > SRR33792312_logs.txt
 ```
 - Plot figure: 
 ```bash
-python plot_progression.py logs.txt
+python plot_progression.py SRR33792312_logs.txt
 ```
 - Generated figure: 
+![fig](/figs/SRR33792312_logs_kmers_plot.png)
 
-TODO
+## TODO 
+- [ ] Stream support (enabling to avoid full download of the file)
+- [ ] Parallelization on reads
+- [ ] Code cleaning & optimizations 
+- [ ] Check what to do when acceleration of number of distinct solid kmers wrt kmers is positive 

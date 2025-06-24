@@ -46,8 +46,8 @@ def main(input_file_path):
     # plot log x values: 
     # plt.xscale('log')
     # plt.yscale('log')
-    plt.plot(df['Nb kmers seen'], df['Nb unique k-mers'], marker='o')
-    plt.title(f'{file_name} Nb distinct solid canonical k-mers vs Nb total of kmer')
+    plt.plot(df['Nb kmers seen'], df['Nb unique k-mers'], marker='o', label='Observed')
+    plt.title(f'From file \"{file_name}\": nb distinct solid canonical k-mers vs nb total of kmer')
     plt.xlabel('Number of kmers seen')
     plt.ylabel('Number of distinct solid canonical k-mers')
     plt.grid(True)
@@ -64,6 +64,9 @@ def main(input_file_path):
     x_values_estimated = range(last_nb_kmers_seen - range_estimation, last_nb_kmers_seen + 1, 100000)
     y_values_estimated = [last_nb_unique_kmers + growth * (x - last_nb_kmers_seen) for x in x_values_estimated]
     plt.plot(x_values_estimated, y_values_estimated, color='green', linestyle='--', label='Estimated growth trend (before)')
+    
+    # add legends
+    plt.legend()
     
     plt.savefig(f'{file_name}_kmers_plot.png')
     print(f"Plot saved as {file_name}_kmers_plot.png")
