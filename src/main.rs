@@ -13,6 +13,7 @@ use rustc_hash::FxHashMap;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    
     /// Length of k-mers
     #[arg(short, long)]
     k: usize,
@@ -21,7 +22,7 @@ struct Args {
     #[arg(short, long)]
     input: PathBuf,
     
-    /// Stop if acceleration is below or equal to this threshold
+    // /// Stop if acceleration is below or equal to this threshold
     // #[arg(long, default_value_t = 10.0)]
     // stop_acceleration: f64,
     
@@ -34,9 +35,9 @@ struct Args {
     // #[arg(long, default_value_t = false)]
     // plot: bool,
     
-    /// Target number of stable curves to find before stopping
-    #[arg(long, default_value_t = 10)]
-    nb_stable_curves_found_target: usize,
+    /// Maximal number of stable curves to find before stopping
+    #[arg(long, default_value_t = 50)]
+    nb_stable_curves_found_max: usize,
     
     
     /// Show progress and details
@@ -189,15 +190,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut nb_dskmers_seen_history: Vec<usize> = vec![0];
     // vector of growth values
     let mut growth_history: Vec<f32> = vec![0.0];
-    // let mut b: f32 = 0.0;
-    // let mut c: f32 = 0.0;
     let mut nb_stable_curves_found: usize = 0;
-    // let nb_stable_curves_found_target: usize = 20; // number of stable curves to find before stopping
+    
+    let mut previous_stable_curve_acceleration: f32 = 0.0;
+    let mut stop = false;
     // TODO paralelize the processing of reads
     while let Some(record) = reader.next() {
+        if stop {
+            break;
+        }
         
-        
-        if nb_stable_curves_found == args.nb_stable_curves_found_target {
+        if nb_stable_curves_found == args.nb_stable_curves_found_max {
             break;
         }
         debug!(
@@ -257,8 +260,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 
                 
                 
-                // b = avg_growth;
-                // c = avg_acceleration;
                 growth_history.push(avg_growth);
                 
                 verbose!("Poly2 curve found: f(kmers) = ? + {}*kmers + {}*kmers^2", avg_growth, avg_acceleration);
@@ -282,12 +283,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 nb_stable_curves_found += 1;
                 verbose!("Stable curve found {}/{}: f(kmers) = ? + {}*kmers + {}*kmers^2", 
-                    nb_stable_curves_found, args.nb_stable_curves_found_target, avg_growth, avg_acceleration);
+                    nb_stable_curves_found, args.nb_stable_curves_found_max, avg_growth, avg_acceleration);
                 
-                break;
-            }
-        }
-    }
+                // Don't stop if the current acceleration is more than 10% different from the previous stable curve acceleration
+                if nb_stable_curves_found > 1 {
+                    if (avg_acceleration - previous_stable_curve_acceleration).abs() > 0.1 * previous_stable_curve_acceleration.abs() {
+                        verbose!("Current acceleration ({}) is more than 10% different from the previous stable curve acceleration ({}), waiting for more reads...", 
+                            avg_acceleration, previous_stable_curve_acceleration);
+                    }
+                    else {
+                        stop = true;
+                        verbose!("Stopping after {} stable curves.", nb_stable_curves_found);
+                    }
+                }
+                previous_stable_curve_acceleration = avg_acceleration;
+            } // Check point 
+        } // all kmers
+    }// all reads
     println!(
         "Final unique k-mers: {}, after processing {} kmers.",
         unique_solid_kmers, nb_kmers_seen

@@ -7,11 +7,10 @@ A Rust-based tool for visualizing the number of solid canonical kmers while stre
 ## Features
 
 - Supports **FASTA** and **FASTQ**
-- Supports **gzip-compressed** files (`.gz`). **WARNING** In this case the extrapolation of number of reads and kmers is false. TODO: add an option to inform the number of reads. 
-- Real-time WebSocket output for monitoring
+- Real-time WebSocket output for monitoring (Disabled in code)
 - **Growth**: The number of new solid k-mers between read intervals.
 - **Acceleration**: The second derivative of k-mer discovery, indicating whether the rate of discovery is increasing, decreasing, or stabilizing
-- Early termination based on configurable acceleration threshold
+- Early termination based on low and stable accelerations 
 - For fasta and fastq files: estimates the number of reads and extrapolates an estimate of the total number of kmers. 
 - /!\ This does not work for .gz files (as we cannot easily estimate the size of the file and so the number of reads)
 
@@ -38,24 +37,26 @@ Options:
           Length of k-mers
   -i, --input <INPUT>
           Input FASTA file
-      --stop-acceleration <STOP_ACCELERATION>
-          Stop if acceleration is below this threshold [default: 10]
       --nb-reads <NB_READS>
-          Inform the number of reads
-          [default: 0] (in this case the number of reads is estimated)
-      --plot
-          Plot the intermediate results in plot.html (may slowdown the process)
+          Give the number of reads [default: 0]
+      --nb-stable-curves-found-max <NB_STABLE_CURVES_FOUND_MAX>
+          Maximal number of stable curves to find before stopping [default: 50]
+  -v, --verbose
+          Show progress and details
+  -d, --debug
+          Show debug information
   -h, --help
           Print help
   -V, --version
           Print version
+
 ```
 
 ## Example
 ```
-pukc --k 25 --input input.fq --stop-acceleration 20
+pukc --k 25 --input input.fq 
 ```
-- In this case the solid 25-mers are counted as long as the acceleration over 50000 reads is higher than 20.
+- In this case the solid distinct canonical 25-mers are counted 
 - Then the number of kmers is extrapolated 
 
 ## Full example.
