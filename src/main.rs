@@ -5,6 +5,7 @@ use needletail::{parse_fastx_file, Sequence};
 use std::error::Error;
 use std::usize;
 use verbose_macros::{debug, verbose};
+use bitnuc::as_2bit;
 
 /// Fast hash map
 use rustc_hash::FxHashMap;
@@ -147,7 +148,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let k = args.k;
     
-    let mut unique_kmers: FxHashMap<Vec<u8>, bool> = FxHashMap::default();
+    let mut unique_kmers: FxHashMap<u64, bool> = FxHashMap::default();
     let mut unique_solid_kmers: usize = 0;
     
     // Set the debug and verbose flags
@@ -214,7 +215,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             debug!("Processing k-mer: {:?}", String::from_utf8_lossy(kmer));
             // TODO transform the kmer to 2 bits per base (A=00, C=01, G=10, T=11)
             nb_kmers_seen += 1;
-            match unique_kmers.get_mut(kmer) {
+            match unique_kmers.get_mut(&as_2bit(kmer).expect("valid k-mer")) {
                 Some(seen) => {
                     if !*seen {
                         *seen = true;
@@ -227,7 +228,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 None => {
-                    unique_kmers.insert(kmer.to_vec(), false);
+                    unique_kmers.insert(as_2bit(kmer).expect("valid k-mer"), false);
                     debug!(
                         "Inserted new k-mer: {}",
                         String::from_utf8_lossy(kmer)
@@ -365,7 +366,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // We consider the used growth as the last 20 values of the growth history
     // TRY LINEAR INTERPOLATION: use a better interpolation method to estimate the averag growth
-    // for instance linear interpolation or polynomial interpolation
     use interp::{interp, InterpMode};
     // x is the last 20 values of the nb_kmers_seen_history (or less if there are not enough values)
     let x: Vec<f32> = nb_kmers_seen_history.iter().rev().take(20).map(|&x| x as f32).collect();
@@ -378,18 +378,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         interpolated_number_of_kmers
     );
 
-    // TRY POLYNOMIAL INTERPOLATION: use a polynomial interpolation to estimate the average growth
-    use polynominal_interpolation;
-    // create a vector xs composed of nb_kmers_seen_history as f64
-    let xs: Vec<f64> = nb_kmers_seen_history.iter().rev().take(20).map(|&x| x as f64).collect::<Vec<_>>().into_iter().rev().collect();
-    // create a vector ys composed of nb_dskmers_seen_history as f64
-    let ys: Vec<f64> = nb_dskmers_seen_history.iter().rev().take(20).map(|&x| x as f64).collect::<Vec<_>>().into_iter().rev().collect();
-    let f = polynominal_interpolation::newton_interpolation(xs, ys);
-    let estimated_distinct_kmers = f((nb_kmers_seen + estimated_kmers_remaining) as f64);
-    println!(
-        "Estimated total distinct canonical using polynomial interpolation: {:.0}",
-        estimated_distinct_kmers
-    );
+    // // TRY POLYNOMIAL INTERPOLATION: use a polynomial interpolation to estimate the average growth
+    // use polynominal_interpolation;
+    // // create a vector xs composed of nb_kmers_seen_history as f64
+    // let xs: Vec<f64> = nb_kmers_seen_history.iter().rev().take(20).map(|&x| x as f64).collect::<Vec<_>>().into_iter().rev().collect();
+    // // create a vector ys composed of nb_dskmers_seen_history as f64
+    // let ys: Vec<f64> = nb_dskmers_seen_history.iter().rev().take(20).map(|&x| x as f64).collect::<Vec<_>>().into_iter().rev().collect();
+    // let f = polynominal_interpolation::newton_interpolation(xs, ys);
+    // let estimated_distinct_kmers = f((nb_kmers_seen + estimated_kmers_remaining) as f64);
+    // println!(
+    //     "Estimated total distinct canonical using polynomial interpolation: {:.0}",
+    //     estimated_distinct_kmers
+    // );
 
 
     let used_avg_growth: f32 = growth_history.iter().rev().take(20).sum::<f32>() / 10.0;
